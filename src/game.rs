@@ -233,6 +233,8 @@ pub struct Player {
     pub pos: Vec2,
     pub angle: f32,
     pub health: i32,
+    /// Armour points: absorb a third of incoming damage until spent.
+    pub armour: i32,
     pub bullets: i32,
     pub shells: i32,
     pub rockets: i32,
@@ -564,10 +566,11 @@ pub enum PickupKind {
     Chaingun,
     Launcher,
     Rockets,
+    Armour,
 }
 
 impl PickupKind {
-    pub const ALL: [PickupKind; 7] = [
+    pub const ALL: [PickupKind; 8] = [
         PickupKind::Medkit,
         PickupKind::Ammo,
         PickupKind::Shells,
@@ -575,6 +578,7 @@ impl PickupKind {
         PickupKind::Chaingun,
         PickupKind::Launcher,
         PickupKind::Rockets,
+        PickupKind::Armour,
     ];
 
     pub fn index(self) -> usize {
@@ -586,6 +590,7 @@ impl PickupKind {
             PickupKind::Chaingun => 4,
             PickupKind::Launcher => 5,
             PickupKind::Rockets => 6,
+            PickupKind::Armour => 7,
         }
     }
 
@@ -608,6 +613,7 @@ pub struct Snapshot {
     pub total_enemies: usize,
     pub time: f32,
     pub kills: usize,
+    pub secrets_found: usize,
     pub player: PlayerSnapshot,
     pub enemies: Vec<EnemySnapshot>,
     pub barrels: Vec<BarrelSnapshot>,
@@ -620,6 +626,7 @@ pub struct PlayerSnapshot {
     pub pos: Vec2,
     pub angle: f32,
     pub health: i32,
+    pub armour: i32,
     pub bullets: i32,
     pub shells: i32,
     pub rockets: i32,
@@ -735,6 +742,9 @@ pub struct Game {
     pub time: f32,
     pub kills: usize,
     pub total_enemies: usize,
+    /// Secret niches found / hidden on this level.
+    pub secrets_found: usize,
+    pub secrets_total: usize,
     pub map_open: bool,
     /// Sound events raised this frame; drained by the front end.
     pub sounds: Vec<SoundRequest>,
@@ -755,6 +765,7 @@ impl Game {
         let mut pickups = Vec::new();
         let mut enemy_count = 0usize;
         let mut pickup_count = 0usize;
+        let mut secret_count = 0usize;
 
         for (y, row) in LEVELS[level].rows.iter().enumerate() {
             for (x, ch) in row.chars().enumerate() {
@@ -793,11 +804,12 @@ impl Game {
                         alive: true,
                         fade: 0.0,
                     }),
-                    'm' | 'a' | 's' => {
+                    'm' | 'a' | 's' | 'v' => {
                         if difficulty.spawns_pickup(pickup_count) {
                             let kind = match ch {
                                 'm' => PickupKind::Medkit,
                                 'a' => PickupKind::Ammo,
+                                'v' => PickupKind::Armour,
                                 _ => PickupKind::Shells,
                             };
                             pickups.push(Pickup {
@@ -832,6 +844,17 @@ impl Game {
                         }
                         pickup_count += 1;
                     }
+                    // A secret niche: the wall itself is the container
+                    // (see map.rs), and its medkit stays hidden until the
+                    // niche is opened. Always spawns, like a weapon.
+                    'x' => {
+                        secret_count += 1;
+                        pickups.push(Pickup {
+                            pos,
+                            kind: PickupKind::Medkit,
+                            taken: false,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -846,6 +869,7 @@ impl Game {
                 pos: spawn,
                 angle: 0.0,
                 health: 100,
+                armour: 0,
                 bullets: 50,
                 shells: 0,
                 rockets: 0,
@@ -871,6 +895,8 @@ impl Game {
             time: 0.0,
             kills: 0,
             total_enemies,
+            secrets_found: 0,
+            secrets_total: secret_count,
             map_open: false,
             sounds: Vec::new(),
             rng: Rng::new(0xD00D_1234_5678_9ABC),
@@ -885,10 +911,12 @@ impl Game {
             total_enemies: self.total_enemies,
             time: self.time,
             kills: self.kills,
+            secrets_found: self.secrets_found,
             player: PlayerSnapshot {
                 pos: self.player.pos,
                 angle: self.player.angle,
                 health: self.player.health,
+                armour: self.player.armour,
                 bullets: self.player.bullets,
                 shells: self.player.shells,
                 rockets: self.player.rockets,
@@ -953,9 +981,11 @@ impl Game {
         game.total_enemies = s.total_enemies.max(s.enemies.len());
         game.time = s.time.max(0.0);
         game.kills = s.kills.min(game.total_enemies);
+        game.secrets_found = s.secrets_found.min(game.secrets_total);
         game.player.pos = s.player.pos;
         game.player.angle = s.player.angle.rem_euclid(std::f32::consts::TAU);
         game.player.health = s.player.health.clamp(1, 100);
+        game.player.armour = s.player.armour.clamp(0, 100);
         game.player.bullets = s.player.bullets.clamp(0, 200);
         game.player.shells = s.player.shells.clamp(0, 60);
         game.player.rockets = s.player.rockets.clamp(0, 50);
@@ -1200,6 +1230,12 @@ impl Game {
         if input.use_pressed {
             match self.map.use_at(self.player.pos, self.player.angle) {
                 UseOutcome::Opened => {
+                    let pos = self.player.pos + Vec2::from_angle(self.player.angle) * 0.9;
+                    self.play_at(SoundId::DoorOpen, pos, 0.9);
+                }
+                UseOutcome::Secret => {
+                    self.secrets_found += 1;
+                    self.message("A SECRET IS REVEALED");
                     let pos = self.player.pos + Vec2::from_angle(self.player.angle) * 0.9;
                     self.play_at(SoundId::DoorOpen, pos, 0.9);
                 }
@@ -1572,6 +1608,14 @@ impl Game {
         }
     }
 
+    /// A pickup inside a still-sealed secret niche is neither visible
+    /// nor collectible. Concealment is derived from the map, so a save
+    /// game restores it exactly from the niche's saved openness.
+    fn pickup_concealed(&self, p: &Pickup) -> bool {
+        let (x, y) = (p.pos.x.floor() as i32, p.pos.y.floor() as i32);
+        matches!(self.map.cell(x, y), Cell::Secret(_)) && self.map.door_open(x, y) < 0.7
+    }
+
     fn update_pickups(&mut self) {
         let pos = self.player.pos;
         let bonus = self.difficulty.pickup_bonus();
@@ -1583,7 +1627,10 @@ impl Game {
         let mut taken: Vec<usize> = Vec::new();
         let mut messages: Vec<&'static str> = Vec::new();
         for i in 0..self.pickups.len() {
-            if self.pickups[i].taken || self.pickups[i].pos.dist(pos) > 0.6 {
+            if self.pickups[i].taken
+                || self.pickups[i].pos.dist(pos) > 0.6
+                || self.pickup_concealed(&self.pickups[i])
+            {
                 continue;
             }
             match self.pickups[i].kind {
@@ -1593,6 +1640,13 @@ impl Game {
                     }
                     self.player.health = (self.player.health + medkit).min(100);
                     messages.push("PICKED UP A MEDKIT");
+                }
+                PickupKind::Armour => {
+                    if self.player.armour >= 100 {
+                        continue;
+                    }
+                    self.player.armour = 100;
+                    messages.push("PICKED UP AN ARMOUR VEST");
                 }
                 PickupKind::Ammo => {
                     if self.player.bullets >= 200 {
@@ -1718,6 +1772,14 @@ impl Game {
         }
         let amount = ((amount as f32) * self.difficulty.damage_taken()).round() as i32;
         let amount = amount.max(1);
+        // Armour eats a third of every hit until it is spent.
+        let absorbed = if self.player.armour > 0 {
+            (amount / 3).min(self.player.armour)
+        } else {
+            0
+        };
+        self.player.armour -= absorbed;
+        let amount = amount - absorbed;
         self.player.health -= amount;
         self.player.hurt = (self.player.hurt + amount as f32 / 26.0).min(1.0);
         let pos = self.player.pos;
@@ -1754,11 +1816,12 @@ impl Game {
             }
         }
         for p in &self.pickups {
-            if p.taken {
+            if p.taken || self.pickup_concealed(p) {
                 continue;
             }
             let (tex, size) = match p.kind {
                 PickupKind::Medkit => (SPR_MEDKIT, 0.42),
+                PickupKind::Armour => (SPR_ARMOUR_PICKUP, 0.46),
                 PickupKind::Ammo => (SPR_AMMO, 0.38),
                 PickupKind::Shells => (SPR_SHELLS, 0.34),
                 PickupKind::Shotgun => (SPR_SHOTGUN_PICKUP, 0.5),
@@ -1820,6 +1883,8 @@ impl Game {
             Cell::Wall(TEX_DOOR) => (200, 170, 50),
             Cell::Wall(_) => (104, 110, 122),
             Cell::Door(_) => (200, 170, 50),
+            // A secret looks like a wall here too. That is the point.
+            Cell::Secret(_) => (104, 110, 122),
         }
     }
 }
@@ -2561,6 +2626,72 @@ mod tests {
         assert!(!g.bursts.is_empty(), "no explosion flash");
         g.age_bursts(1.0);
         assert!(g.bursts.is_empty(), "the flash never faded");
+    }
+
+    #[test]
+    fn armour_eats_a_third_of_every_hit() {
+        let mut g = Game::new(0);
+        g.player.armour = 100;
+        g.damage_player(30);
+        assert_eq!(g.player.armour, 90, "armour did not absorb its third");
+        assert_eq!(g.player.health, 80, "the wearer took the unabsorbed rest");
+        // Once it is spent, hits land in full again.
+        g.player.armour = 0;
+        g.damage_player(30);
+        assert_eq!(g.player.health, 50);
+    }
+
+    #[test]
+    fn an_armour_vest_sets_you_to_full_armour() {
+        let mut g = Game::new(0);
+        let vest = g
+            .pickups
+            .iter()
+            .position(|p| p.kind == PickupKind::Armour)
+            .expect("the entryway has a vest");
+        g.player.pos = g.pickups[vest].pos;
+        g.update(1.0 / 60.0, &Input::default());
+        assert_eq!(g.player.armour, 100);
+        assert!(g.pickups[vest].taken);
+    }
+
+    #[test]
+    fn a_secret_hides_its_medkit_until_opened() {
+        let mut g = Game::new(0);
+        assert_eq!(g.secrets_total, 1);
+        let niche = Vec2::new(15.5, 10.5);
+        // Even standing in the sealed niche, you cannot take what you
+        // cannot see.
+        g.player.pos = niche;
+        g.player.health = 50;
+        g.update(1.0 / 60.0, &Input::default());
+        assert_eq!(g.player.health, 50, "took a medkit through a sealed wall");
+        assert!(
+            !g.sprites().iter().any(|s| s.pos == niche),
+            "the hidden medkit was drawn"
+        );
+        // Face the wall and use it: the niche opens and stays counted.
+        g.player.pos = Vec2::new(14.5, 10.5);
+        g.player.angle = 0.0;
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                use_pressed: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(g.secrets_found, 1);
+        assert!(
+            g.messages.iter().any(|(m, _)| m == "A SECRET IS REVEALED"),
+            "the reveal was never announced"
+        );
+        for _ in 0..90 {
+            g.update(1.0 / 60.0, &Input::default());
+        }
+        // Now the medkit is there for the taking.
+        g.player.pos = niche;
+        g.update(1.0 / 60.0, &Input::default());
+        assert_eq!(g.player.health, 75, "the revealed medkit did nothing");
     }
 
     #[test]

@@ -452,6 +452,8 @@ impl App {
             level_name: self.game.level_name(),
             kills: self.game.kills,
             total: self.game.total_enemies,
+            secrets: self.game.secrets_found,
+            secrets_total: self.game.secrets_total,
             time: self.game.time,
         };
         self.total_kills += self.game.kills;

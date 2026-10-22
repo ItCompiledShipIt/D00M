@@ -60,6 +60,8 @@ pub const SPR_BOSS_ATTACK: usize = 35;
 pub const SPR_BOSS_PAIN: usize = 36;
 pub const SPR_BOSS_CORPSE: usize = 37;
 
+pub const SPR_ARMOUR_PICKUP: usize = 38;
+
 // --- Weapon texture ids ----------------------------------------------------
 pub const WEAPON_PISTOL: usize = 0;
 pub const WEAPON_PISTOL_FIRE: usize = 1;
@@ -131,6 +133,7 @@ impl Textures {
         sprites.push(boss_attack());
         sprites.push(boss_pain());
         sprites.push(boss_corpse());
+        sprites.push(armour_pickup());
 
         Self {
             walls,
@@ -554,6 +557,25 @@ fn medkit() -> Tex {
     t.rect(29, 38, 6, 14, rgb(206, 40, 34));
     t.rect(25, 42, 14, 6, rgb(206, 40, 34));
     t.rect(30, 34, 4, 3, rgb(140, 140, 136));
+    t
+}
+
+fn armour_pickup() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 56.0, 18.0, 4.0, rgb(16, 16, 16));
+    // A green flak vest on a stand: shoulders, chest plates, straps.
+    let vest = rgb(56, 122, 66);
+    let shade = rgb(38, 84, 46);
+    let strap = rgb(30, 30, 30);
+    t.ellipse(32.0, 34.0, 17.0, 15.0, vest);
+    t.rect(15, 34, 34, 20, vest);
+    t.rect(15, 34, 34, 3, rgb(96, 168, 104));
+    t.rect(29, 34, 6, 20, strap);
+    t.rect(15, 43, 34, 3, shade);
+    t.rect(15, 50, 34, 2, shade);
+    t.rect(20, 37, 6, 5, shade);
+    t.rect(38, 37, 6, 5, shade);
+    t.rect(24, 22, 16, 5, shade);
     t
 }
 

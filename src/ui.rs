@@ -93,6 +93,8 @@ pub struct Stats {
     pub level_name: &'static str,
     pub kills: usize,
     pub total: usize,
+    pub secrets: usize,
+    pub secrets_total: usize,
     pub time: f32,
 }
 
@@ -588,6 +590,16 @@ pub fn intermission_screen(frame: &mut [u32], time: f32, stats: &Stats, has_next
         H,
         W as i32 / 2,
         178,
+        &format!("SECRETS   {} / {}", stats.secrets, stats.secrets_total),
+        TEXT,
+        1,
+    );
+    font::draw_centered(
+        frame,
+        W,
+        H,
+        W as i32 / 2,
+        198,
         &format!("TIME   {} SECONDS", stats.time.round() as i32),
         TEXT,
         1,
@@ -762,6 +774,8 @@ mod tests {
                 level_name: "E1M1",
                 kills: 3,
                 total: 5,
+                secrets: 1,
+                secrets_total: 2,
                 time: 42.0,
             },
             true,

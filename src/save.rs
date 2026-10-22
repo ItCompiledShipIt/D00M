@@ -115,16 +115,17 @@ fn encode(run: &Run) -> String {
     out.push('\n');
     out.push_str(&format!("run {} {:.4}\n", run.total_kills, run.total_time));
     out.push_str(&format!(
-        "level {} {} {} {:.4} {}\n",
+        "level {} {} {} {:.4} {} {}\n",
         s.level,
         s.difficulty.index(),
         s.kills,
         s.time,
-        s.total_enemies
+        s.total_enemies,
+        s.secrets_found
     ));
     let p = &s.player;
     out.push_str(&format!(
-        "ply {:.4} {:.4} {:.4} {} {} {} {} {} {} {} {}\n",
+        "ply {:.4} {:.4} {:.4} {} {} {} {} {} {} {} {} {}\n",
         p.pos.x,
         p.pos.y,
         p.angle,
@@ -135,7 +136,8 @@ fn encode(run: &Run) -> String {
         if p.has_shotgun { 1 } else { 0 },
         p.rockets,
         if p.has_chaingun { 1 } else { 0 },
-        if p.has_launcher { 1 } else { 0 }
+        if p.has_launcher { 1 } else { 0 },
+        p.armour
     ));
     for d in &s.doors {
         out.push_str(&format!(
@@ -200,7 +202,7 @@ fn decode(text: &str) -> Option<Run> {
 
     let mut total_kills = 0;
     let mut total_time = 0.0f32;
-    let mut level: Option<(usize, Difficulty, usize, f32, usize)> = None;
+    let mut level: Option<(usize, Difficulty, usize, f32, usize, usize)> = None;
     let mut player: Option<PlayerSnapshot> = None;
     let mut doors = Vec::new();
     let mut enemies = Vec::new();
@@ -222,6 +224,8 @@ fn decode(text: &str) -> Option<Run> {
                     num(&parts, 3)?,
                     num::<f32>(&parts, 4)?.max(0.0),
                     num(&parts, 5)?,
+                    // Written by newer builds; older saves default to none.
+                    num(&parts, 6).unwrap_or(0),
                 ));
             }
             "ply" => {
@@ -236,6 +240,7 @@ fn decode(text: &str) -> Option<Run> {
                     rockets: num(&parts, 9).unwrap_or(0),
                     has_chaingun: flag(&parts, 10),
                     has_launcher: flag(&parts, 11),
+                    armour: num(&parts, 12).unwrap_or(0),
                 });
             }
             "door" => doors.push(DoorSnapshot {
@@ -274,7 +279,7 @@ fn decode(text: &str) -> Option<Run> {
         }
     }
 
-    let (level, difficulty, kills, time, total_enemies) = level?;
+    let (level, difficulty, kills, time, total_enemies, secrets_found) = level?;
     Some(Run {
         snapshot: Snapshot {
             level: level.min(crate::levels::LEVELS.len() - 1),
@@ -282,6 +287,7 @@ fn decode(text: &str) -> Option<Run> {
             total_enemies,
             time,
             kills,
+            secrets_found,
             player: player?,
             enemies,
             barrels,

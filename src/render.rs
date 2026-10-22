@@ -342,6 +342,18 @@ impl Renderer {
             health_color,
             3,
         );
+        if game.player.armour > 0 {
+            font::draw(
+                frame,
+                W,
+                H,
+                176,
+                top_i + 38,
+                &format!("ARMOUR {}", game.player.armour),
+                0x0078_C878,
+                1,
+            );
+        }
         font::draw(
             frame,
             W,
@@ -660,7 +672,8 @@ fn cast(map: &Map, origin: Vec2, dir: Vec2) -> (Option<WallHit>, Option<DoorHit>
         let cell = map.cell(map_x, map_y);
         let is_wall = matches!(cell, Cell::Wall(_));
         let is_door = matches!(cell, Cell::Door(_));
-        if !is_wall && !is_door {
+        let is_secret = matches!(cell, Cell::Secret(_));
+        if !is_wall && !is_door && !is_secret {
             continue;
         }
         let mut wall_x = if side == 0 {
@@ -688,6 +701,29 @@ fn cast(map: &Map, origin: Vec2, dir: Vec2) -> (Option<WallHit>, Option<DoorHit>
             Cell::Door(tex) => {
                 let open = map.door_open(map_x, map_y);
                 if door_hit.is_none() && open < 0.98 {
+                    door_hit = Some(DoorHit {
+                        dist: perp,
+                        tex,
+                        side,
+                        wall_x,
+                        open,
+                    });
+                }
+            }
+            Cell::Secret(tex) => {
+                let open = map.door_open(map_x, map_y);
+                if open < 0.7 {
+                    // Sealed: indistinguishable from the wall it hides in.
+                    return (
+                        Some(WallHit {
+                            dist: perp,
+                            tex,
+                            side,
+                            wall_x,
+                        }),
+                        door_hit,
+                    );
+                } else if door_hit.is_none() && open < 0.98 {
                     door_hit = Some(DoorHit {
                         dist: perp,
                         tex,

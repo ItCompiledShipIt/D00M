@@ -8,6 +8,10 @@ pub enum Cell {
     Empty,
     Wall(u8),
     Door(u8),
+    /// A wall that is secretly a door: same texture as its neighbours,
+    /// same sliding machinery as a door, but it never closes again and
+    /// the automap shows it as a plain wall.
+    Secret(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +27,7 @@ pub enum UseOutcome {
     None,
     Opened,
     Exit,
+    Secret,
 }
 
 pub struct Map {
@@ -41,6 +46,30 @@ impl Map {
     pub fn from_level(rows: &[&str]) -> Map {
         let h = rows.len();
         let w = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0);
+        let grid: Vec<Vec<char>> = rows.iter().map(|r| r.chars().collect()).collect();
+        let tex_of = |ch: char| -> Option<u8> {
+            match ch {
+                '#' => Some(TEX_BRICK),
+                '=' => Some(TEX_TECH),
+                'H' => Some(TEX_HELL),
+                'M' => Some(TEX_MARBLE),
+                'C' => Some(TEX_CRATE),
+                _ => None,
+            }
+        };
+        // A secret wears the texture of the nearest plain wall, so it
+        // blends into whatever it is hiding in.
+        let secret_tex = |x: usize, y: usize| -> u8 {
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx >= 0 && ny >= 0 && (ny as usize) < h && (nx as usize) < w {
+                    if let Some(tex) = tex_of(grid[ny as usize][nx as usize]) {
+                        return tex;
+                    }
+                }
+            }
+            TEX_BRICK
+        };
         let mut cells = vec![Cell::Empty; w * h];
         let mut doors = Vec::new();
         for (y, row) in rows.iter().enumerate() {
@@ -55,6 +84,10 @@ impl Map {
                     'D' => {
                         doors.push((x as i32, y as i32));
                         Cell::Door(TEX_DOOR)
+                    }
+                    'x' => {
+                        doors.push((x as i32, y as i32));
+                        Cell::Secret(secret_tex(x, y))
                     }
                     _ => Cell::Empty,
                 };
@@ -111,7 +144,7 @@ impl Map {
     pub fn restore_door_states(&mut self, states: &[(i32, i32, f32, u8, f32)]) {
         for &(x, y, open, phase, timer) in states {
             let Some(i) = self.idx(x, y) else { continue };
-            if !matches!(self.cells[i], Cell::Door(_)) {
+            if !matches!(self.cells[i], Cell::Door(_) | Cell::Secret(_)) {
                 continue;
             }
             self.open[i] = if open.is_finite() {
@@ -144,7 +177,7 @@ impl Map {
         match self.cell(x, y) {
             Cell::Empty => false,
             Cell::Wall(_) => true,
-            Cell::Door(_) => self.door_open(x, y) < 0.7,
+            Cell::Door(_) | Cell::Secret(_) => self.door_open(x, y) < 0.7,
         }
     }
 
@@ -153,7 +186,7 @@ impl Map {
         match self.cell(x, y) {
             Cell::Empty => false,
             Cell::Wall(_) => true,
-            Cell::Door(_) => self.door_open(x, y) < 0.85,
+            Cell::Door(_) | Cell::Secret(_) => self.door_open(x, y) < 0.85,
         }
     }
 
@@ -231,6 +264,16 @@ impl Map {
                     self.raise_door(x, y);
                     return UseOutcome::Opened;
                 }
+                Cell::Secret(_) => {
+                    let Some(i) = self.idx(x, y) else {
+                        return UseOutcome::None;
+                    };
+                    if matches!(self.phase[i], Phase::Closed | Phase::Closing) {
+                        self.raise_door(x, y);
+                        return UseOutcome::Secret;
+                    }
+                    return UseOutcome::None;
+                }
                 Cell::Wall(_) => return UseOutcome::None,
                 Cell::Empty => {}
             }
@@ -252,6 +295,16 @@ impl Map {
         self.closed_doors.clear();
         for (x, y) in self.doors.clone() {
             let Some(i) = self.idx(x, y) else { continue };
+            if matches!(self.cells[i], Cell::Secret(_)) {
+                // Secrets slide open like doors but never close again.
+                if self.phase[i] == Phase::Opening {
+                    self.open[i] = (self.open[i] + dt * 1.6).min(1.0);
+                    if self.open[i] >= 1.0 {
+                        self.phase[i] = Phase::Open;
+                    }
+                }
+                continue;
+            }
             let occupied = player.x.floor() as i32 == x && player.y.floor() as i32 == y;
             match self.phase[i] {
                 Phase::Closed => {}
@@ -396,6 +449,49 @@ mod tests {
                 }
             }
             assert_eq!(switches, 1, "{} needs exactly one exit", level.name);
+        }
+    }
+
+    #[test]
+    #[test]
+    fn secrets_look_like_walls_open_once_and_stay_open() {
+        let mut map = Map::from_level(LEVELS[0].rows);
+        // The entryway secret hides in the brick partition at (15, 10).
+        assert_eq!(map.cell(15, 10), Cell::Secret(TEX_BRICK));
+        assert!(map.is_solid(15, 10));
+        assert!(map.blocks_sight(15, 10));
+        let outcome = map.use_at(Vec2::new(14.5, 10.5), 0.0);
+        assert_eq!(outcome, UseOutcome::Secret);
+        // Using it again while it opens reports nothing new.
+        assert_eq!(map.use_at(Vec2::new(14.5, 10.5), 0.0), UseOutcome::None);
+        for _ in 0..120 {
+            map.update(1.0 / 60.0, Vec2::new(3.5, 2.5));
+        }
+        assert!(map.door_open(15, 10) > 0.99);
+        assert!(!map.is_solid(15, 10));
+        // Minutes later, with nobody near, it is still open: secrets do
+        // not re-seal the way doors do.
+        for _ in 0..3600 {
+            map.update(1.0 / 60.0, Vec2::new(3.5, 2.5));
+        }
+        assert!(map.door_open(15, 10) > 0.99, "the secret re-sealed itself");
+    }
+
+    #[test]
+    fn every_level_hides_exactly_one_secret() {
+        for level in LEVELS {
+            let count: usize = level
+                .rows
+                .iter()
+                .map(|r| r.chars().filter(|&c| c == 'x').count())
+                .sum();
+            assert_eq!(count, 1, "{} has {count} secrets", level.name);
+            let map = Map::from_level(level.rows);
+            let secrets = (0..map.h as i32)
+                .flat_map(|y| (0..map.w as i32).map(move |x| (x, y)))
+                .filter(|&(x, y)| matches!(map.cell(x, y), Cell::Secret(_)))
+                .count();
+            assert_eq!(secrets, 1, "{} secret did not survive parsing", level.name);
         }
     }
 

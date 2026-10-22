@@ -154,6 +154,8 @@ pub fn capture_screen(path: &str, name: &str) -> std::io::Result<()> {
                 level_name: "E1M1: ENTRYWAY",
                 kills: 9,
                 total: 12,
+                secrets: 1,
+                secrets_total: 1,
                 time: 187.0,
             },
             true,
