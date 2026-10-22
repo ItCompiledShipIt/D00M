@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust" alt="Rust 2024 edition">
-  <img src="https://img.shields.io/badge/tests-92_passing-brightgreen" alt="92 tests passing">
+  <img src="https://img.shields.io/badge/tests-91_passing-brightgreen" alt="91 tests passing">
   <img src="https://img.shields.io/badge/clippy-0_warnings-brightgreen" alt="Clippy clean">
   <img src="https://img.shields.io/badge/dependencies-4-blue" alt="4 dependencies">
   <img src="https://img.shields.io/badge/assets-0_files-red" alt="Zero asset files">
@@ -204,7 +204,7 @@ note appears; unplug it and the game carries on.
 ## Development
 
 ```sh
-cargo test               # 92 unit tests
+cargo test               # 91 unit tests
 cargo clippy --all-targets
 cargo run --release -- --shot frame.bmp --at 17.2,2.5,0 --steps 20 --fire
 ```

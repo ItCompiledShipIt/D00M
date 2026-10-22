@@ -62,10 +62,13 @@ impl Map {
         let secret_tex = |x: usize, y: usize| -> u8 {
             for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                 let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                if nx >= 0 && ny >= 0 && (ny as usize) < h && (nx as usize) < w {
-                    if let Some(tex) = tex_of(grid[ny as usize][nx as usize]) {
-                        return tex;
-                    }
+                if nx >= 0
+                    && ny >= 0
+                    && (ny as usize) < h
+                    && (nx as usize) < w
+                    && let Some(tex) = tex_of(grid[ny as usize][nx as usize])
+                {
+                    return tex;
                 }
             }
             TEX_BRICK
@@ -452,7 +455,6 @@ mod tests {
         }
     }
 
-    #[test]
     #[test]
     fn secrets_look_like_walls_open_once_and_stay_open() {
         let mut map = Map::from_level(LEVELS[0].rows);

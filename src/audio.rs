@@ -837,6 +837,7 @@ fn boss_attack(sr: f32) -> Vec<f32> {
 
 /// Add a harmonic tone (fundamental + two overtones) with an exponential
 /// decay and a forced fade at the tail so notes never click off.
+#[allow(clippy::too_many_arguments)] // a bare synthesis primitive, like the font's drawing calls
 fn add_harmonic(
     out: &mut [f32],
     sr: f32,
