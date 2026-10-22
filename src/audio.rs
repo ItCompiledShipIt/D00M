@@ -35,9 +35,11 @@ pub enum SoundId {
     ImpDeath,
     Chaingun,
     RocketLaunch,
+    DemonDeath,
+    KnightDeath,
 }
 
-const SOUND_COUNT: usize = 16;
+const SOUND_COUNT: usize = 18;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SoundRequest {
@@ -84,6 +86,8 @@ impl Bank {
             Arc::new(imp_death(sample_rate)),
             Arc::new(chaingun(sample_rate)),
             Arc::new(rocket_launch(sample_rate)),
+            Arc::new(demon_death(sample_rate)),
+            Arc::new(knight_death(sample_rate)),
         ];
         debug_assert_eq!(sounds.len(), SOUND_COUNT);
         Self {
@@ -645,6 +649,51 @@ fn imp_death(sr: f32) -> Vec<f32> {
         out.push(growl * env);
     }
     normalize(out, 0.8)
+}
+
+/// The demon dies lower and rougher than the imp: a bigger animal
+/// emptying its lungs through gravel.
+fn demon_death(sr: f32) -> Vec<f32> {
+    let dur = 0.8f32;
+    let n = (sr * dur) as usize;
+    let mut rng = Rng::new(0x1A05);
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * 0.11;
+        let freq = (118.0 - 84.0 * (t / dur)).max(30.0) + (t * TAU * 4.0).sin() * 5.0;
+        phase += TAU * freq / sr;
+        let growl = saw(phase) * 0.55 + lp * 0.45;
+        let env = (t * 22.0).min(1.0) * (1.0 - t / dur).powf(1.1);
+        out.push(growl * env);
+    }
+    normalize(out, 0.85)
+}
+
+/// The hell knight goes down like a falling statue: a deep thud with a
+/// metallic ring as its armour hits the floor.
+fn knight_death(sr: f32) -> Vec<f32> {
+    let dur = 1.15f32;
+    let n = (sr * dur) as usize;
+    let mut rng = Rng::new(0x1A06);
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * 0.2;
+        let freq = (66.0 - 38.0 * (t / dur)).max(26.0);
+        phase += TAU * freq / sr;
+        let thud = saw(phase) * 0.5 + lp * (-t * 16.0).exp() * 0.3;
+        let ring = ((t * TAU * 523.0).sin() + (t * TAU * 787.0).sin() * 0.6) * (-t * 8.0).exp() * 0.16;
+        let env = (t * 26.0).min(1.0) * (1.0 - t / dur).powf(0.9);
+        out.push((thud + ring) * env);
+    }
+    normalize(out, 0.85)
 }
 
 /// An eight second, seamlessly looping industrial drone.

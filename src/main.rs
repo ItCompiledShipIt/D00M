@@ -970,6 +970,12 @@ impl App {
             self.pad_notice = None;
         }
 
+        if matches!(self.screen, Screen::Paused) {
+            // The world stays frozen, but explosion flashes keep fading
+            // so a blast never sticks behind the pause menu.
+            self.game.age_bursts(dt);
+        }
+
         self.draw();
         let notice = self.pad_notice.clone();
         if let Some((text, left)) = notice {

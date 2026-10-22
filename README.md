@@ -149,7 +149,8 @@ note appears; unplug it and the game carries on.
   auto-close behind you.
 - **Enemies** — three kinds sharing one idle/chase/attack/pain/death state
   machine: imps (fireballs), demons (fast, melee-only chargers) and hell
-  knights (slow, armoured, throw green hellfire). Each has its own health,
+  knights (slow, heavily armoured — their plates turn aside a quarter of
+  every hit — and throw green hellfire). Each has its own health,
   speed, reach, damage and cooldown, and corpses stay where they fell.
 - **Weapons** — pistol, shotgun (seven pellets), chaingun (rapid single
   bullets) and rocket launcher (travelling rockets with splash damage that

@@ -324,6 +324,25 @@ impl EnemyKind {
         }
     }
 
+    /// Damage this kind actually takes from an incoming hit of `amount`.
+    /// The hell knight's armour turns aside a quarter of every blow,
+    /// rounded up so even a single pistol round still stings for 1.
+    fn damage_taken(self, amount: i32) -> i32 {
+        match self {
+            EnemyKind::Knight => (amount * 3 + 3) / 4,
+            _ => amount,
+        }
+    }
+
+    /// The sound this kind makes when it dies.
+    fn death_sound(self) -> SoundId {
+        match self {
+            EnemyKind::Imp => SoundId::ImpDeath,
+            EnemyKind::Demon => SoundId::DemonDeath,
+            EnemyKind::Knight => SoundId::KnightDeath,
+        }
+    }
+
     /// Chasing speed in cells per second.
     fn speed(self) -> f32 {
         match self {
@@ -336,7 +355,7 @@ impl EnemyKind {
     fn melee_reach(self) -> f32 {
         match self {
             EnemyKind::Imp => 1.6,
-            EnemyKind::Demon => 1.9,
+            EnemyKind::Demon => 1.35,
             EnemyKind::Knight => 1.5,
         }
     }
@@ -967,6 +986,16 @@ impl Game {
         self.sounds.push(SoundRequest { id, gain, pan });
     }
 
+    /// Age and retire explosion flashes. `update` calls this before the
+    /// Playing-state gate, and the front end calls it while paused, so a
+    /// blast never sticks on screen behind the pause menu or a corpse.
+    pub fn age_bursts(&mut self, dt: f32) {
+        for b in &mut self.bursts {
+            b.age += dt;
+        }
+        self.bursts.retain(|b| b.age < BURST_LIFE);
+    }
+
     pub fn update(&mut self, dt: f32, input: &Input) {
         let dt = dt.clamp(0.0001, 0.05);
         self.time += dt;
@@ -983,10 +1012,7 @@ impl Game {
         if input.toggle_map {
             self.map_open = !self.map_open;
         }
-        for b in &mut self.bursts {
-            b.age += dt;
-        }
-        self.bursts.retain(|b| b.age < BURST_LIFE);
+        self.age_bursts(dt);
         self.player.hurt = (self.player.hurt - dt * 1.4).max(0.0);
         self.player.muzzle = (self.player.muzzle - dt).max(0.0);
         self.player.fire_anim = (self.player.fire_anim - dt * 6.0).max(0.0);
@@ -1253,7 +1279,7 @@ impl Game {
             let kind = self.enemies[i].kind;
             let died = {
                 let e = &mut self.enemies[i];
-                e.health -= damage;
+                e.health -= kind.damage_taken(damage);
                 if e.health <= 0 {
                     e.alive = false;
                     e.state = EnemyState::Dead;
@@ -1270,7 +1296,7 @@ impl Game {
                 if kind != EnemyKind::Imp {
                     self.message(format!("{} SLAIN", kind.name()));
                 }
-                self.play_at(SoundId::ImpDeath, pos, 0.9);
+                self.play_at(kind.death_sound(), pos, 0.9);
             } else {
                 self.play_at(SoundId::ImpPain, pos, 0.75);
             }
@@ -1538,7 +1564,7 @@ impl Game {
         let mut killed = Vec::new();
         for e in &mut self.enemies {
             if e.alive && e.pos.dist(pos) < radius {
-                e.health -= damage;
+                e.health -= e.kind.damage_taken(damage);
                 if e.health <= 0 {
                     e.alive = false;
                     e.state = EnemyState::Dead;
@@ -1555,7 +1581,7 @@ impl Game {
             if kind != EnemyKind::Imp {
                 self.message(format!("{} SLAIN", kind.name()));
             }
-            self.play_at(SoundId::ImpDeath, pos, 0.85);
+            self.play_at(kind.death_sound(), pos, 0.85);
         }
         for b in &mut self.barrels {
             if b.alive && b.pos.dist(pos) < radius * 0.85 && b.pos.dist(pos) > 0.01 {
@@ -2245,6 +2271,87 @@ mod tests {
             "a wall-hugging rocket halved the player: {}",
             g.player.health
         );
+    }
+
+    #[test]
+    fn knight_armour_turns_aside_a_quarter_of_every_hit() {
+        assert_eq!(EnemyKind::Knight.damage_taken(100), 75);
+        assert_eq!(EnemyKind::Knight.damage_taken(95), 72);
+        assert_eq!(EnemyKind::Knight.damage_taken(9), 7);
+        assert_eq!(EnemyKind::Knight.damage_taken(1), 1);
+        assert_eq!(EnemyKind::Imp.damage_taken(100), 100);
+        assert_eq!(EnemyKind::Demon.damage_taken(100), 100);
+    }
+
+    #[test]
+    fn a_healthy_knight_survives_a_rocket_blast() {
+        let mut g = Game::new(0);
+        let i = g
+            .enemies
+            .iter()
+            .position(|e| e.kind == EnemyKind::Demon)
+            .expect("the entryway has a demon");
+        // Isolate the test subject so no other death muddies the sounds.
+        for (j, e) in g.enemies.iter_mut().enumerate() {
+            if j != i {
+                e.alive = false;
+            }
+        }
+        let pos = g.player.pos + Vec2::new(2.0, 0.0);
+        g.enemies[i].kind = EnemyKind::Knight;
+        g.enemies[i].health = EnemyKind::Knight.base_health();
+        g.enemies[i].pos = pos;
+        g.explode(pos, 3.4, 95);
+        assert!(g.enemies[i].alive, "armour did not save the knight");
+        assert_eq!(g.enemies[i].health, 120 - 72);
+        assert!(
+            !g.sounds.iter().any(|s| s.id == SoundId::KnightDeath),
+            "the knight lived but still played its death sound"
+        );
+    }
+
+    #[test]
+    fn splash_kills_use_each_kinds_own_death_sound() {
+        let mut g = Game::new(0);
+        let i = g
+            .enemies
+            .iter()
+            .position(|e| e.kind == EnemyKind::Demon)
+            .expect("the entryway has a demon");
+        for (j, e) in g.enemies.iter_mut().enumerate() {
+            if j != i {
+                e.alive = false;
+            }
+        }
+        let pos = g.player.pos + Vec2::new(2.0, 0.0);
+        g.enemies[i].pos = pos;
+        g.enemies[i].health = 10;
+        g.explode(pos, 3.4, 95);
+        assert!(!g.enemies[i].alive, "the blast did not kill the demon");
+        assert!(
+            g.sounds.iter().any(|s| s.id == SoundId::DemonDeath),
+            "the demon died with the wrong sound"
+        );
+        assert!(
+            !g.sounds.iter().any(|s| s.id == SoundId::ImpDeath),
+            "the demon died with the imp's sound"
+        );
+    }
+
+    #[test]
+    fn the_demon_has_the_shortest_reach_of_the_three_kinds() {
+        assert!(EnemyKind::Demon.melee_reach() < EnemyKind::Knight.melee_reach());
+        assert!(EnemyKind::Knight.melee_reach() < EnemyKind::Imp.melee_reach());
+    }
+
+    #[test]
+    fn bursts_age_out_without_the_world_updating() {
+        let mut g = Game::new(0);
+        g.barrels[0].health = 0;
+        g.update(1.0 / 60.0, &Input::default());
+        assert!(!g.bursts.is_empty(), "no explosion flash");
+        g.age_bursts(1.0);
+        assert!(g.bursts.is_empty(), "the flash never faded");
     }
 
     #[test]
