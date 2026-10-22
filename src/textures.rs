@@ -53,6 +53,13 @@ pub const SPR_BOOM0: usize = 30;
 pub const SPR_BOOM1: usize = 31;
 pub const SPR_BOOM2: usize = 32;
 
+// The Gatekeeper.
+pub const SPR_BOSS_WALK0: usize = 33;
+pub const SPR_BOSS_WALK1: usize = 34;
+pub const SPR_BOSS_ATTACK: usize = 35;
+pub const SPR_BOSS_PAIN: usize = 36;
+pub const SPR_BOSS_CORPSE: usize = 37;
+
 // --- Weapon texture ids ----------------------------------------------------
 pub const WEAPON_PISTOL: usize = 0;
 pub const WEAPON_PISTOL_FIRE: usize = 1;
@@ -118,6 +125,12 @@ impl Textures {
         for stage in 0..3 {
             sprites.push(explosion_frame(stage));
         }
+        for w in 0..2 {
+            sprites.push(boss_walk(w));
+        }
+        sprites.push(boss_attack());
+        sprites.push(boss_pain());
+        sprites.push(boss_corpse());
 
         Self {
             walls,
@@ -942,6 +955,104 @@ fn knight_corpse() -> Tex {
     t.ellipse(24.0, 56.0, 3.0, 2.0, rgb(120, 220, 130));
     t.line(14, 58, 7, 59, rgb(190, 200, 184));
     t.line(50, 58, 57, 59, rgb(190, 200, 184));
+    t
+}
+
+// --- The Gatekeeper ----------------------------------------------------------
+
+fn boss_walk(frame: usize) -> Tex {
+    let mut t = Tex::new(64, 64);
+    let bob = [0.0, -1.5][frame % 2];
+    let leg = [0.0, 3.0][frame % 2];
+    // Basalt violet-grey hide, a crown of bone, and a molten heart.
+    let hide = rgb(64, 52, 78);
+    let dark = rgb(38, 30, 50);
+    let light = rgb(98, 82, 114);
+    let bone = rgb(216, 204, 178);
+    let molten = rgb(255, 138, 42);
+    let core = rgb(255, 196, 84);
+
+    // Massive legs and feet.
+    t.ellipse(23.0, 50.0 + leg, 8.5, 11.0, dark);
+    t.ellipse(41.0, 50.0 - leg, 8.5, 11.0, dark);
+    t.ellipse(21.0, 60.0, 9.5, 3.2, rgb(48, 40, 58));
+    t.ellipse(43.0, 60.0, 9.5, 3.2, rgb(48, 40, 58));
+    // A torso like a furnace door.
+    t.ellipse(32.0, 35.0 + bob, 21.0, 16.5, hide);
+    t.ellipse(32.0, 29.0 + bob, 13.0, 9.5, light);
+    // The molten core, with cracks running out of it.
+    t.ellipse(32.0, 36.0 + bob, 5.0, 5.5, molten);
+    t.ellipse(32.0, 36.0 + bob, 2.4, 2.6, core);
+    for (x, y, dx, dy) in [(27, 33, -4, -3), (37, 33, 4, -3), (28, 40, -3, 4), (36, 40, 3, 4)] {
+        t.line(x, y + bob as i32, x + dx, y + dy + bob as i32, molten);
+    }
+    // Shoulders with bone spikes, arms like siege timbers.
+    t.ellipse(11.0, 27.0 + bob, 10.0, 13.0, dark);
+    t.ellipse(53.0, 27.0 + bob, 10.0, 13.0, dark);
+    t.line(8, 16 + bob as i32, 3, 6, bone);
+    t.line(56, 16 + bob as i32, 61, 6, bone);
+    t.ellipse(9.0, 43.0 + bob, 7.0, 8.0, hide);
+    t.ellipse(55.0, 43.0 + bob, 7.0, 8.0, hide);
+    for i in 0..3 {
+        t.line(5 + i * 3, 49 + bob as i32, 3 + i * 3, 54 + bob as i32, bone);
+        t.line(53 + i * 3, 49 + bob as i32, 55 + i * 3, 54 + bob as i32, bone);
+    }
+    // Crowned head: three horns, hellfire eyes, a jaw full of teeth.
+    t.ellipse(32.0, 14.0 + bob, 11.5, 8.5, hide);
+    t.line(24, 8 + bob as i32, 18, 0, bone);
+    t.line(32, 6 + bob as i32, 32, 0, bone);
+    t.line(40, 8 + bob as i32, 46, 0, bone);
+    t.rect(21, 11 + bob as i32, 22, 2, dark);
+    t.rect(25, 13 + bob as i32, 4, 2, rgb(126, 255, 150));
+    t.rect(35, 13 + bob as i32, 4, 2, rgb(126, 255, 150));
+    t.ellipse(32.0, 19.0 + bob, 8.5, 4.5, rgb(52, 10, 12));
+    for i in 0..5 {
+        t.rect(25 + i * 3, 16 + bob as i32, 2, 3, rgb(240, 234, 212));
+    }
+    t.vertical_gradient(1.08, 0.82);
+    t
+}
+
+fn boss_attack() -> Tex {
+    let mut t = boss_walk(0);
+    // Arms hurled up, the core flaring to conjure hellfire.
+    t.ellipse(8.0, 18.0, 7.5, 10.0, rgb(50, 40, 64));
+    t.ellipse(56.0, 18.0, 7.5, 10.0, rgb(50, 40, 64));
+    for i in 0..3 {
+        t.line(4 + i * 3, 10, 2 + i * 3, 4, rgb(216, 204, 178));
+        t.line(54 + i * 3, 10, 56 + i * 3, 4, rgb(216, 204, 178));
+    }
+    t.ellipse(32.0, 36.0, 7.0, 7.5, rgb(255, 138, 42));
+    t.ellipse(32.0, 36.0, 3.6, 3.8, rgb(255, 226, 150));
+    // Maw wide open.
+    t.ellipse(32.0, 19.0, 9.5, 5.5, rgb(96, 16, 14));
+    t
+}
+
+fn boss_pain() -> Tex {
+    let mut t = boss_walk(1);
+    t.ellipse(32.0, 14.0, 11.5, 8.5, rgb(112, 94, 128));
+    t.line(24, 10, 28, 14, rgb(255, 250, 236));
+    t.line(28, 10, 24, 14, rgb(255, 250, 236));
+    t.line(36, 10, 40, 14, rgb(255, 250, 236));
+    t.line(40, 10, 36, 14, rgb(255, 250, 236));
+    t.vertical_gradient(1.16, 0.9);
+    t
+}
+
+fn boss_corpse() -> Tex {
+    let mut t = Tex::new(64, 64);
+    // A collapsed mountain: the core gone dark, one horn snapped beside it.
+    t.ellipse(32.0, 57.0, 27.0, 6.0, rgb(70, 16, 12));
+    t.ellipse(32.0, 54.0, 21.0, 6.5, rgb(52, 42, 62));
+    t.ellipse(20.0, 53.0, 9.0, 4.5, rgb(74, 62, 88));
+    t.ellipse(44.0, 55.0, 8.0, 4.0, rgb(38, 30, 50));
+    t.ellipse(32.0, 53.0, 4.5, 3.0, rgb(110, 56, 18));
+    t.line(10, 58, 3, 56, rgb(196, 186, 164));
+    t.line(12, 60, 5, 61, rgb(196, 186, 164));
+    for i in 0..5 {
+        t.set(24 + i * 4, 51, rgb(232, 224, 200));
+    }
     t
 }
 

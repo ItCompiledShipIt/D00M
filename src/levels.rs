@@ -2,8 +2,8 @@
 //!
 //! Legend: `#` brick, `=` tech, `H` hell, `M` marble, `C` crate, `S` exit
 //! switch, `D` door. Entities: `P` player, `i` imp, `d` demon, `k` hell
-//! knight, `b` barrel, `m` medkit, `a` ammo, `s` shells, `g` shotgun,
-//! `c` chaingun, `L` rocket launcher, `r` rockets.
+//! knight, `B` the Gatekeeper, `b` barrel, `m` medkit, `a` ammo,
+//! `s` shells, `g` shotgun, `c` chaingun, `L` rocket launcher, `r` rockets.
 
 pub struct Level {
     pub name: &'static str,
@@ -133,7 +133,7 @@ const INFERNO: &[&str] = &[
     "H...H........HHHHHH............H",
     "H...H.............H.....i......H",
     "H.a.D.............H...L........H",
-    "H...H.............H.......s....H",
+    "H...H.............H......Bs....H",
     "H...H.............H............H",
     "H...Hk....b.......H............H",
     "H...H.............H......i.....H",

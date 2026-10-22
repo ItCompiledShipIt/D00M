@@ -37,9 +37,10 @@ pub enum SoundId {
     RocketLaunch,
     DemonDeath,
     KnightDeath,
+    BossDeath,
 }
 
-const SOUND_COUNT: usize = 18;
+const SOUND_COUNT: usize = 19;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SoundRequest {
@@ -88,6 +89,7 @@ impl Bank {
             Arc::new(rocket_launch(sample_rate)),
             Arc::new(demon_death(sample_rate)),
             Arc::new(knight_death(sample_rate)),
+            Arc::new(boss_death(sample_rate)),
         ];
         debug_assert_eq!(sounds.len(), SOUND_COUNT);
         Self {
@@ -694,6 +696,29 @@ fn knight_death(sr: f32) -> Vec<f32> {
         out.push((thud + ring) * env);
     }
     normalize(out, 0.85)
+}
+
+/// The Gatekeeper's death is the biggest sound in the game: a sub-bass
+/// collapse under breaking stone, with the knight's ring dropped an octave.
+fn boss_death(sr: f32) -> Vec<f32> {
+    let dur = 1.6f32;
+    let n = (sr * dur) as usize;
+    let mut rng = Rng::new(0x1A07);
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * 0.16;
+        let freq = (92.0 - 66.0 * (t / dur)).max(24.0);
+        phase += TAU * freq / sr;
+        let body = saw(phase) * 0.5 + lp * (-t * 5.0).exp() * 0.45;
+        let ring = ((t * TAU * 262.0).sin() + (t * TAU * 392.0).sin() * 0.6) * (-t * 6.0).exp() * 0.14;
+        let env = (t * 30.0).min(1.0) * (1.0 - t / dur).powf(0.8);
+        out.push((body + ring) * env);
+    }
+    normalize(out, 0.9)
 }
 
 /// An eight second, seamlessly looping industrial drone.

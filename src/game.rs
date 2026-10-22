@@ -282,7 +282,7 @@ pub enum EnemyState {
     Dead,
 }
 
-/// The three kinds of demon in the episode.
+/// The kinds of demon in the episode, and the thing waiting at the end of it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnemyKind {
     /// Original fireball-throwing imp.
@@ -291,16 +291,25 @@ pub enum EnemyKind {
     Demon,
     /// Slow, heavily armoured, throws green hellfire.
     Knight,
+    /// The Gatekeeper: the boss holding the final exit. Fires hellfire in
+    /// threes and fights faster once it is half dead.
+    Boss,
 }
 
 impl EnemyKind {
-    pub const ALL: [EnemyKind; 3] = [EnemyKind::Imp, EnemyKind::Demon, EnemyKind::Knight];
+    pub const ALL: [EnemyKind; 4] = [
+        EnemyKind::Imp,
+        EnemyKind::Demon,
+        EnemyKind::Knight,
+        EnemyKind::Boss,
+    ];
 
     pub fn index(self) -> usize {
         match self {
             EnemyKind::Imp => 0,
             EnemyKind::Demon => 1,
             EnemyKind::Knight => 2,
+            EnemyKind::Boss => 3,
         }
     }
 
@@ -313,6 +322,7 @@ impl EnemyKind {
             EnemyKind::Imp => "IMP",
             EnemyKind::Demon => "DEMON",
             EnemyKind::Knight => "HELL KNIGHT",
+            EnemyKind::Boss => "THE GATEKEEPER",
         }
     }
 
@@ -321,6 +331,7 @@ impl EnemyKind {
             EnemyKind::Imp => 40,
             EnemyKind::Demon => 80,
             EnemyKind::Knight => 120,
+            EnemyKind::Boss => 600,
         }
     }
 
@@ -340,6 +351,7 @@ impl EnemyKind {
             EnemyKind::Imp => SoundId::ImpDeath,
             EnemyKind::Demon => SoundId::DemonDeath,
             EnemyKind::Knight => SoundId::KnightDeath,
+            EnemyKind::Boss => SoundId::BossDeath,
         }
     }
 
@@ -349,6 +361,7 @@ impl EnemyKind {
             EnemyKind::Imp => 1.75,
             EnemyKind::Demon => 2.75,
             EnemyKind::Knight => 1.25,
+            EnemyKind::Boss => 1.15,
         }
     }
 
@@ -357,6 +370,7 @@ impl EnemyKind {
             EnemyKind::Imp => 1.6,
             EnemyKind::Demon => 1.35,
             EnemyKind::Knight => 1.5,
+            EnemyKind::Boss => 1.9,
         }
     }
 
@@ -365,6 +379,7 @@ impl EnemyKind {
             EnemyKind::Imp => 9,
             EnemyKind::Demon => 14,
             EnemyKind::Knight => 11,
+            EnemyKind::Boss => 24,
         }
     }
 
@@ -373,6 +388,7 @@ impl EnemyKind {
             EnemyKind::Imp => 1.1,
             EnemyKind::Demon => 0.85,
             EnemyKind::Knight => 1.5,
+            EnemyKind::Boss => 1.3,
         }
     }
 
@@ -382,6 +398,7 @@ impl EnemyKind {
             EnemyKind::Imp => Some((5.2, 11, 10.0, SPR_FIREBALL)),
             EnemyKind::Demon => None,
             EnemyKind::Knight => Some((4.0, 18, 12.0, SPR_HELLFIRE)),
+            EnemyKind::Boss => Some((4.6, 16, 13.0, SPR_HELLFIRE)),
         }
     }
 
@@ -390,6 +407,7 @@ impl EnemyKind {
             EnemyKind::Imp => (0.78, 0.92),
             EnemyKind::Demon => (0.95, 1.02),
             EnemyKind::Knight => (0.88, 1.12),
+            EnemyKind::Boss => (1.45, 1.65),
         }
     }
 
@@ -403,6 +421,7 @@ impl EnemyKind {
             }
             EnemyKind::Demon => [SPR_DEMON_WALK0, SPR_DEMON_WALK1][frame % 2],
             EnemyKind::Knight => [SPR_KNIGHT_WALK0, SPR_KNIGHT_WALK1][frame % 2],
+            EnemyKind::Boss => [SPR_BOSS_WALK0, SPR_BOSS_WALK1][frame % 2],
         }
     }
 
@@ -411,6 +430,7 @@ impl EnemyKind {
             EnemyKind::Imp => SPR_IMP_ATTACK,
             EnemyKind::Demon => SPR_DEMON_ATTACK,
             EnemyKind::Knight => SPR_KNIGHT_ATTACK,
+            EnemyKind::Boss => SPR_BOSS_ATTACK,
         }
     }
 
@@ -419,6 +439,7 @@ impl EnemyKind {
             EnemyKind::Imp => SPR_IMP_PAIN,
             EnemyKind::Demon => SPR_DEMON_PAIN,
             EnemyKind::Knight => SPR_KNIGHT_PAIN,
+            EnemyKind::Boss => SPR_BOSS_PAIN,
         }
     }
 
@@ -427,6 +448,7 @@ impl EnemyKind {
             EnemyKind::Imp => SPR_IMP_CORPSE,
             EnemyKind::Demon => SPR_DEMON_CORPSE,
             EnemyKind::Knight => SPR_KNIGHT_CORPSE,
+            EnemyKind::Boss => SPR_BOSS_CORPSE,
         }
     }
 
@@ -709,11 +731,14 @@ impl Game {
                 let pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 match ch {
                     'P' => spawn = pos,
-                    'i' | 'd' | 'k' => {
-                        if difficulty.spawns_enemy(enemy_count) {
+                    'i' | 'd' | 'k' | 'B' => {
+                        // The Gatekeeper always spawns: the finale gate
+                        // would be pointless without him.
+                        if ch == 'B' || difficulty.spawns_enemy(enemy_count) {
                             let kind = match ch {
                                 'd' => EnemyKind::Demon,
                                 'k' => EnemyKind::Knight,
+                                'B' => EnemyKind::Boss,
                                 _ => EnemyKind::Imp,
                             };
                             let health = (kind.base_health() as f32 * difficulty.health_scale())
@@ -1149,8 +1174,18 @@ impl Game {
                     self.play_at(SoundId::DoorOpen, pos, 0.9);
                 }
                 UseOutcome::Exit => {
-                    self.state = GameState::Won;
-                    self.message("EXIT ACTIVATED");
+                    // The final exit stays sealed while the Gatekeeper lives.
+                    let gate_held = self.level + 1 == LEVELS.len()
+                        && self
+                            .enemies
+                            .iter()
+                            .any(|e| e.alive && e.kind == EnemyKind::Boss);
+                    if gate_held {
+                        self.message("THE GATEKEEPER STILL LIVES");
+                    } else {
+                        self.state = GameState::Won;
+                        self.message("EXIT ACTIVATED");
+                    }
                 }
                 UseOutcome::None => {}
             }
@@ -1297,6 +1332,9 @@ impl Game {
                     self.message(format!("{} SLAIN", kind.name()));
                 }
                 self.play_at(kind.death_sound(), pos, 0.9);
+                if kind == EnemyKind::Boss {
+                    self.boss_falls(pos);
+                }
             } else {
                 self.play_at(SoundId::ImpPain, pos, 0.75);
             }
@@ -1308,12 +1346,15 @@ impl Game {
     fn update_enemies(&mut self, dt: f32) {
         let speed_scale = self.difficulty.enemy_speed();
         let cooldown_scale = self.difficulty.enemy_cooldown();
+        let boss_full = (EnemyKind::Boss.base_health() as f32 * self.difficulty.health_scale())
+            .round() as i32;
         let map = &self.map;
         let player_pos = self.player.pos;
         let playing = self.state == GameState::Playing;
         let mut damage_to_player = 0;
         let mut shots: Vec<(Vec2, Vec2, i32, usize)> = Vec::new();
         let mut sounds: Vec<(SoundId, Vec2)> = Vec::new();
+        let mut boss_woke = false;
 
         for e in self.enemies.iter_mut() {
             if !e.alive {
@@ -1332,6 +1373,9 @@ impl Game {
                     if los && dist < 14.0 {
                         e.state = EnemyState::Chase;
                         e.anim = 0.0;
+                        if e.kind == EnemyKind::Boss {
+                            boss_woke = true;
+                        }
                         sounds.push((SoundId::ImpSight, e.pos));
                     }
                 }
@@ -1353,24 +1397,46 @@ impl Game {
                     let kind = e.kind;
                     let reach = kind.melee_reach();
                     let dir = to_player.norm();
+                    // Half-dead, the Gatekeeper fights in a fury.
+                    let enraged = kind == EnemyKind::Boss && e.health * 2 <= boss_full;
+                    let speed_mul = if enraged { 1.45 } else { 1.0 };
+                    let cd_mul = if enraged { 0.55 } else { 1.0 };
                     if !los {
                         // Wander toward the last known player position.
-                        map.try_move(&mut e.pos, dir * kind.speed() * 0.6 * speed_scale * dt, 0.3);
+                        map.try_move(
+                            &mut e.pos,
+                            dir * kind.speed() * speed_mul * 0.6 * speed_scale * dt,
+                            0.3,
+                        );
                     } else if dist > reach * 0.8 {
-                        map.try_move(&mut e.pos, dir * kind.speed() * speed_scale * dt, 0.3);
+                        map.try_move(
+                            &mut e.pos,
+                            dir * kind.speed() * speed_mul * speed_scale * dt,
+                            0.3,
+                        );
                     }
                     if e.cooldown <= 0.0 && los {
                         if dist < reach {
                             damage_to_player += kind.melee_damage();
-                            e.cooldown = kind.attack_cooldown() * cooldown_scale;
+                            e.cooldown = kind.attack_cooldown() * cd_mul * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.32;
                             sounds.push((SoundId::ImpAttack, e.pos));
                         } else if let Some((speed, damage, range, sprite)) = kind.projectile()
                             && dist < range
                         {
-                            shots.push((e.pos + dir * 0.35, dir * speed, damage, sprite));
-                            e.cooldown = kind.attack_cooldown() * 2.0 * cooldown_scale;
+                            if kind == EnemyKind::Boss {
+                                // Hellfire in threes: a fan, not a single bolt.
+                                for off in [-0.17f32, 0.0, 0.17] {
+                                    let (s, c) = off.sin_cos();
+                                    let fanned =
+                                        Vec2::new(dir.x * c - dir.y * s, dir.x * s + dir.y * c);
+                                    shots.push((e.pos + fanned * 0.35, fanned * speed, damage, sprite));
+                                }
+                            } else {
+                                shots.push((e.pos + dir * 0.35, dir * speed, damage, sprite));
+                            }
+                            e.cooldown = kind.attack_cooldown() * 2.0 * cd_mul * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.4;
                             sounds.push((SoundId::ImpAttack, e.pos));
@@ -1393,8 +1459,24 @@ impl Game {
         for (id, pos) in sounds {
             self.play_at(id, pos, 0.8);
         }
+        if boss_woke {
+            self.message("THE GATEKEEPER AWAKENS");
+        }
         if damage_to_player > 0 {
             self.damage_player(damage_to_player);
+        }
+    }
+
+    /// The Gatekeeper does not die quietly.
+    fn boss_falls(&mut self, pos: Vec2) {
+        self.play_at(SoundId::Explosion, pos, 1.0);
+        for (dx, dy) in [(0.0, 0.0), (0.55, 0.2), (-0.5, -0.25), (0.15, -0.55)] {
+            if self.bursts.len() < 24 {
+                self.bursts.push(Burst {
+                    pos: pos + Vec2::new(dx, dy),
+                    age: 0.0,
+                });
+            }
         }
     }
 
@@ -1582,6 +1664,9 @@ impl Game {
                 self.message(format!("{} SLAIN", kind.name()));
             }
             self.play_at(kind.death_sound(), pos, 0.85);
+            if kind == EnemyKind::Boss {
+                self.boss_falls(pos);
+            }
         }
         for b in &mut self.barrels {
             if b.alive && b.pos.dist(pos) < radius * 0.85 && b.pos.dist(pos) > 0.01 {
@@ -1824,6 +1909,100 @@ mod tests {
             },
         );
         assert_eq!(g.state, GameState::Won);
+    }
+
+    #[test]
+    fn the_gatekeeper_spawns_on_every_difficulty() {
+        for d in Difficulty::ALL {
+            let g = Game::with_difficulty(4, d);
+            assert!(
+                g.enemies.iter().any(|e| e.kind == EnemyKind::Boss),
+                "no gatekeeper on {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gatekeeper_guards_the_final_exit() {
+        let mut g = Game::new(4);
+        let use_it = Input {
+            use_pressed: true,
+            ..Default::default()
+        };
+        g.player.pos = Vec2::new(30.5, 22.4);
+        g.player.angle = std::f32::consts::FRAC_PI_2;
+        g.update(1.0 / 60.0, &use_it);
+        assert_eq!(g.state, GameState::Playing, "the gate opened for a live boss");
+        assert!(
+            g.messages.iter().any(|(m, _)| m == "THE GATEKEEPER STILL LIVES"),
+            "the refusal was never explained"
+        );
+        for e in &mut g.enemies {
+            if e.kind == EnemyKind::Boss {
+                e.alive = false;
+            }
+        }
+        g.update(1.0 / 60.0, &use_it);
+        assert_eq!(g.state, GameState::Won, "the gate stayed shut for a dead boss");
+    }
+
+    #[test]
+    fn the_gatekeeper_fires_hellfire_in_threes_and_enrages() {
+        let mut g = Game::new(4);
+        let boss = g
+            .enemies
+            .iter()
+            .position(|e| e.kind == EnemyKind::Boss)
+            .expect("the inferno has a gatekeeper");
+        g.enemies[boss].pos = g.player.pos + Vec2::new(4.0, 0.0);
+        g.enemies[boss].state = EnemyState::Chase;
+        freeze_enemies(&mut g);
+        g.enemies[boss].cooldown = 0.0;
+        g.update(1.0 / 60.0, &Input::default());
+        assert_eq!(g.projectiles.len(), 3, "the volley was not three bolts");
+        let calm = g.enemies[boss].cooldown;
+        // Down to a quarter health, the same volley comes much sooner.
+        g.enemies[boss].health = EnemyKind::Boss.base_health() / 4;
+        g.enemies[boss].cooldown = 0.0;
+        g.enemies[boss].state = EnemyState::Chase;
+        g.update(1.0 / 60.0, &Input::default());
+        assert_eq!(g.projectiles.len(), 6, "the enraged volley never came");
+        assert!(
+            g.enemies[boss].cooldown < calm * 0.7,
+            "no enrage: cooldown {} vs calm {}",
+            g.enemies[boss].cooldown,
+            calm
+        );
+    }
+
+    #[test]
+    fn the_gatekeepers_death_is_announced() {
+        let mut g = Game::new(4);
+        let boss = g
+            .enemies
+            .iter()
+            .position(|e| e.kind == EnemyKind::Boss)
+            .expect("the inferno has a gatekeeper");
+        for (j, e) in g.enemies.iter_mut().enumerate() {
+            if j != boss {
+                e.alive = false;
+            }
+        }
+        // Stand close: play_at drops sounds past 24 cells, by design.
+        let pos = g.player.pos + Vec2::new(2.0, 0.0);
+        g.enemies[boss].pos = pos;
+        g.enemies[boss].health = 10;
+        g.explode(pos, 3.4, 95);
+        assert!(!g.enemies[boss].alive, "the blast did not kill the gatekeeper");
+        assert!(
+            g.messages.iter().any(|(m, _)| m == "THE GATEKEEPER SLAIN"),
+            "the fall was never announced"
+        );
+        assert!(
+            g.sounds.iter().any(|s| s.id == SoundId::BossDeath),
+            "the gatekeeper died with the wrong sound"
+        );
+        assert!(!g.bursts.is_empty(), "the gatekeeper died without a flash");
     }
 
     #[test]
