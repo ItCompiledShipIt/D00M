@@ -1,9 +1,12 @@
-//! Headless frame capture, used for testing the renderer without a window.
-//! Writes a 24-bit BMP so it needs no image crate.
+//! Headless frame capture, used for testing the renderer and the menus without
+//! opening a window. Writes 24-bit BMP files so it needs no image crate.
 
-use crate::game::{Game, Input};
+use crate::config::Score;
+use crate::game::{Difficulty, Game, Input};
 use crate::math::Vec2;
 use crate::render::{H, Renderer, W};
+use crate::save::SlotInfo;
+use crate::ui;
 
 pub struct ShotOptions {
     pub at: Option<Vec2>,
@@ -12,10 +15,11 @@ pub struct ShotOptions {
     pub fire: bool,
     pub show_map: bool,
     pub use_key: bool,
+    pub level: usize,
 }
 
 pub fn capture(path: &str, opts: ShotOptions) -> std::io::Result<()> {
-    let mut game = Game::new();
+    let mut game = Game::new(opts.level);
     if let Some(pos) = opts.at {
         game.player.pos = pos;
     }
@@ -47,6 +51,131 @@ pub fn capture(path: &str, opts: ShotOptions) -> std::io::Result<()> {
     let mut renderer = Renderer::new();
     renderer.render(&game);
     save_bmp(path, W, H, &renderer.frame)
+}
+
+/// Draw one of the front-end screens into a frame, for visual checks.
+pub fn capture_screen(path: &str, name: &str) -> std::io::Result<()> {
+    let mut frame = vec![0u32; W * H];
+    let time = 3.0;
+    let settings = crate::config::load();
+    match name {
+        "menu" => {
+            let best = crate::config::load_scores().into_iter().next();
+            let mut items = Vec::new();
+            if crate::save::any_saved() {
+                items.push(ui::CONTINUE);
+            }
+            items.push(ui::NEW_GAME);
+            if crate::save::any_saved() {
+                items.push(ui::LOAD_GAME);
+            }
+            items.push("SETTINGS");
+            items.push("QUIT");
+            ui::title_menu(&mut frame, time, &items, 0, best.as_ref(), 0.0)
+        }
+        "notice" => {
+            let items = [ui::CONTINUE, ui::NEW_GAME, "SETTINGS", "QUIT"];
+            ui::title_menu(&mut frame, time, &items, 0, None, 0.6);
+            ui::notice(
+                &mut frame,
+                "GAMEPAD CONNECTED: XBOX WIRELESS CONTROLLER",
+                2.5,
+            )
+        }
+        "load" => {
+            let slots = [
+                Some(SlotInfo {
+                    level: 1,
+                    level_name: "E1M2: THE FOUNDRY",
+                    kills: 17,
+                    time: 344.0,
+                    difficulty: Difficulty::Normal,
+                }),
+                None,
+                Some(SlotInfo {
+                    level: 4,
+                    level_name: "E1M5: THE INFERNO",
+                    kills: 41,
+                    time: 902.0,
+                    difficulty: Difficulty::Hard,
+                }),
+            ];
+            ui::load_screen(&mut frame, time, &slots, 0)
+        }
+        "save" => {
+            let slots = [
+                Some(SlotInfo {
+                    level: 1,
+                    level_name: "E1M2: THE FOUNDRY",
+                    kills: 17,
+                    time: 344.0,
+                    difficulty: Difficulty::Normal,
+                }),
+                None,
+                None,
+            ];
+            ui::save_screen(&mut frame, time, &slots, 1)
+        }
+        "settings" => ui::settings_screen(&mut frame, time, &settings, 0),
+        "volume" => ui::volume_screen(&mut frame, time, &settings, 1),
+        "skills" => ui::skill_screen(&mut frame, time, settings.difficulty.index()),
+        "intro" => ui::intro_screen(&mut frame, 6.0),
+        "pause" => {
+            let mut renderer = Renderer::new();
+            renderer.render(&Game::new(0));
+            frame.copy_from_slice(&renderer.frame);
+            ui::pause_screen(&mut frame, 0);
+        }
+        "banner" => {
+            let mut renderer = Renderer::new();
+            renderer.render(&Game::new(0));
+            frame.copy_from_slice(&renderer.frame);
+            ui::level_banner(&mut frame, "E1M1: ENTRYWAY", 0.6);
+        }
+        "intermission" => ui::intermission_screen(
+            &mut frame,
+            time,
+            &ui::Stats {
+                level_name: "E1M1: ENTRYWAY",
+                kills: 9,
+                total: 12,
+                time: 187.0,
+            },
+            true,
+        ),
+        "episode" => {
+            let run = Score {
+                kills: 31,
+                time: 902.0,
+                difficulty: Difficulty::Normal,
+            };
+            let scores = [
+                Score {
+                    kills: 41,
+                    time: 612.0,
+                    difficulty: Difficulty::Hard,
+                },
+                Score {
+                    kills: 38,
+                    time: 754.0,
+                    difficulty: Difficulty::Normal,
+                },
+                run,
+                Score {
+                    kills: 24,
+                    time: 733.0,
+                    difficulty: Difficulty::Easy,
+                },
+            ];
+            ui::episode_complete(&mut frame, time, &run, &scores, Some(2))
+        }
+        other => {
+            return Err(std::io::Error::other(format!(
+                "unknown screen {other:?} (menu, load, save, notice, skills, settings, volume, intro, pause, banner, intermission, episode)"
+            )));
+        }
+    }
+    save_bmp(path, W, H, &frame)
 }
 
 fn save_bmp(path: &str, w: usize, h: usize, px: &[u32]) -> std::io::Result<()> {

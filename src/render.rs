@@ -516,9 +516,19 @@ impl Renderer {
                     H,
                     W as i32 / 2,
                     176,
-                    "PRESS R TO RESTART",
+                    "R OR ENTER TO RESTART",
                     0x00E0_E0D0,
                     2,
+                );
+                font::draw_centered(
+                    &mut self.frame,
+                    W,
+                    H,
+                    W as i32 / 2,
+                    200,
+                    "ESC FOR MAIN MENU",
+                    0x00C0_A090,
+                    1,
                 );
             }
             GameState::Won => {
@@ -732,7 +742,7 @@ mod tests {
 
     #[test]
     fn renderer_produces_a_frame() {
-        let game = Game::new();
+        let game = Game::new(0);
         let mut r = Renderer::new();
         r.render(&game);
         let non_black = r.frame.iter().filter(|&&p| p != 0).count();
@@ -746,7 +756,7 @@ mod tests {
 
     #[test]
     fn upscale_fills_the_destination() {
-        let game = Game::new();
+        let game = Game::new(0);
         let mut r = Renderer::new();
         r.render(&game);
         let mut dst = vec![0u32; 1920 * 1200];

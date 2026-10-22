@@ -1,7 +1,9 @@
 //! Game simulation: player, weapons, hitscan combat, enemy AI, doors, pickups.
 //! Rendering lives in `render.rs`; this module has no graphics code.
 
-use crate::map::{Cell, LEVEL, Map, UseOutcome};
+use crate::audio::{SoundId, SoundRequest};
+use crate::levels::LEVELS;
+use crate::map::{Cell, Map, UseOutcome};
 use crate::math::{Rng, Vec2};
 use crate::textures::*;
 
@@ -9,6 +11,109 @@ const PLAYER_RADIUS: f32 = 0.28;
 const WALK_SPEED: f32 = 3.1;
 const RUN_SPEED: f32 = 4.9;
 const MOUSE_SENSITIVITY: f32 = 0.0022;
+
+/// How hard the episode is. Chosen on the skill screen and remembered in the
+/// saved settings.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Normal,
+    Hard,
+}
+
+impl Difficulty {
+    pub const ALL: [Difficulty; 3] = [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard];
+
+    pub fn index(self) -> usize {
+        match self {
+            Difficulty::Easy => 0,
+            Difficulty::Normal => 1,
+            Difficulty::Hard => 2,
+        }
+    }
+
+    pub fn from_index(index: usize) -> Difficulty {
+        Self::ALL[index.min(Self::ALL.len() - 1)]
+    }
+
+    /// Doom-style skill names for the selection screen.
+    pub fn name(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "I'M TOO YOUNG TO DIE",
+            Difficulty::Normal => "HURT ME PLENTY",
+            Difficulty::Hard => "NIGHTMARE!",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "EASY",
+            Difficulty::Normal => "NORMAL",
+            Difficulty::Hard => "HARD",
+        }
+    }
+
+    /// Multiplier on everything the demons do to the player.
+    pub fn damage_taken(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.55,
+            Difficulty::Normal => 1.0,
+            Difficulty::Hard => 1.5,
+        }
+    }
+
+    pub fn enemy_health(self) -> i32 {
+        match self {
+            Difficulty::Easy => 30,
+            Difficulty::Normal => 40,
+            Difficulty::Hard => 55,
+        }
+    }
+
+    pub fn enemy_speed(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.8,
+            Difficulty::Normal => 1.0,
+            Difficulty::Hard => 1.25,
+        }
+    }
+
+    /// Multiplier on how long imps wait between attacks.
+    pub fn enemy_cooldown(self) -> f32 {
+        match self {
+            Difficulty::Easy => 1.35,
+            Difficulty::Normal => 1.0,
+            Difficulty::Hard => 0.72,
+        }
+    }
+
+    /// Whether the nth imp in a map spawns at all. Easy throws a third fewer
+    /// demons at you; both other skills use the whole map.
+    pub fn spawns_enemy(self, index: usize) -> bool {
+        match self {
+            Difficulty::Easy => index % 3 != 2,
+            _ => true,
+        }
+    }
+
+    /// Whether the nth pickup in a map spawns. Hard leaves fewer supplies.
+    pub fn spawns_pickup(self, index: usize) -> bool {
+        match self {
+            Difficulty::Hard => index % 3 != 2,
+            _ => true,
+        }
+    }
+
+    /// How much health and ammo a pickup is worth, relative to normal.
+    pub fn pickup_bonus(self) -> f32 {
+        match self {
+            Difficulty::Easy => 1.25,
+            Difficulty::Normal => 1.0,
+            Difficulty::Hard => 0.8,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameState {
@@ -24,6 +129,21 @@ pub enum Weapon {
 }
 
 impl Weapon {
+    pub fn index(self) -> usize {
+        match self {
+            Weapon::Pistol => 0,
+            Weapon::Shotgun => 1,
+        }
+    }
+
+    pub fn from_index(index: usize) -> Weapon {
+        if index == 1 {
+            Weapon::Shotgun
+        } else {
+            Weapon::Pistol
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Weapon::Pistol => "PISTOL",
@@ -119,6 +239,28 @@ pub struct Enemy {
     pub alive: bool,
 }
 
+impl EnemyState {
+    pub fn index(self) -> usize {
+        match self {
+            EnemyState::Idle => 0,
+            EnemyState::Chase => 1,
+            EnemyState::Attack => 2,
+            EnemyState::Pain => 3,
+            EnemyState::Dead => 4,
+        }
+    }
+
+    pub fn from_index(index: usize) -> EnemyState {
+        match index {
+            1 => EnemyState::Chase,
+            2 => EnemyState::Attack,
+            3 => EnemyState::Pain,
+            4 => EnemyState::Dead,
+            _ => EnemyState::Idle,
+        }
+    }
+}
+
 impl Enemy {
     pub fn sprite(&self) -> usize {
         match self.state {
@@ -157,10 +299,93 @@ pub enum PickupKind {
     Shotgun,
 }
 
+impl PickupKind {
+    pub fn index(self) -> usize {
+        match self {
+            PickupKind::Medkit => 0,
+            PickupKind::Ammo => 1,
+            PickupKind::Shells => 2,
+            PickupKind::Shotgun => 3,
+        }
+    }
+
+    pub fn from_index(index: usize) -> PickupKind {
+        match index {
+            1 => PickupKind::Ammo,
+            2 => PickupKind::Shells,
+            3 => PickupKind::Shotgun,
+            _ => PickupKind::Medkit,
+        }
+    }
+}
+
 pub struct Pickup {
     pub pos: Vec2,
     pub kind: PickupKind,
     pub taken: bool,
+}
+
+/// Everything needed to rebuild a level exactly as it was, for save games.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Snapshot {
+    pub level: usize,
+    pub difficulty: Difficulty,
+    pub total_enemies: usize,
+    pub time: f32,
+    pub kills: usize,
+    pub player: PlayerSnapshot,
+    pub enemies: Vec<EnemySnapshot>,
+    pub barrels: Vec<BarrelSnapshot>,
+    pub pickups: Vec<PickupSnapshot>,
+    pub doors: Vec<DoorSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerSnapshot {
+    pub pos: Vec2,
+    pub angle: f32,
+    pub health: i32,
+    pub bullets: i32,
+    pub shells: i32,
+    pub weapon: Weapon,
+    pub has_shotgun: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnemySnapshot {
+    pub pos: Vec2,
+    pub health: i32,
+    pub state: EnemyState,
+    pub anim: f32,
+    pub cooldown: f32,
+    pub state_time: f32,
+    pub dead_time: f32,
+    pub alive: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarrelSnapshot {
+    pub pos: Vec2,
+    pub health: i32,
+    pub alive: bool,
+    pub fade: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickupSnapshot {
+    pub pos: Vec2,
+    pub kind: PickupKind,
+    pub taken: bool,
+}
+
+/// A sliding door's progress and timer, keyed by its map cell.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DoorSnapshot {
+    pub x: i32,
+    pub y: i32,
+    pub open: f32,
+    pub phase: u8,
+    pub timer: f32,
 }
 
 pub struct Projectile {
@@ -179,6 +404,8 @@ pub struct Sprite {
 
 #[derive(Default, Clone)]
 pub struct Input {
+    /// Analog movement from a gamepad: (forward, strafe), each -1 to 1.
+    pub move_axis: (f32, f32),
     pub forward: bool,
     pub back: bool,
     pub strafe_l: bool,
@@ -196,6 +423,8 @@ pub struct Input {
 }
 
 pub struct Game {
+    pub level: usize,
+    pub difficulty: Difficulty,
     pub map: Map,
     pub player: Player,
     pub enemies: Vec<Enemy>,
@@ -208,53 +437,69 @@ pub struct Game {
     pub kills: usize,
     pub total_enemies: usize,
     pub map_open: bool,
+    /// Sound events raised this frame; drained by the front end.
+    pub sounds: Vec<SoundRequest>,
     rng: Rng,
 }
 
 impl Game {
-    pub fn new() -> Self {
-        let map = Map::from_level(LEVEL);
+    pub fn new(level: usize) -> Self {
+        Self::with_difficulty(level, Difficulty::default())
+    }
+
+    pub fn with_difficulty(level: usize, difficulty: Difficulty) -> Self {
+        let level = level.min(LEVELS.len() - 1);
+        let map = Map::from_level(LEVELS[level].rows);
         let mut spawn = Vec2::new(2.5, 2.5);
         let mut enemies = Vec::new();
         let mut barrels = Vec::new();
         let mut pickups = Vec::new();
+        let mut imp_count = 0usize;
+        let mut pickup_count = 0usize;
 
-        for (y, row) in LEVEL.iter().enumerate() {
+        for (y, row) in LEVELS[level].rows.iter().enumerate() {
             for (x, ch) in row.chars().enumerate() {
                 let pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 match ch {
                     'P' => spawn = pos,
-                    'i' => enemies.push(Enemy {
-                        pos,
-                        health: 40,
-                        state: EnemyState::Idle,
-                        anim: 0.0,
-                        cooldown: 0.6,
-                        state_time: 0.0,
-                        dead_time: 0.0,
-                        alive: true,
-                    }),
+                    'i' => {
+                        if difficulty.spawns_enemy(imp_count) {
+                            enemies.push(Enemy {
+                                pos,
+                                health: difficulty.enemy_health(),
+                                state: EnemyState::Idle,
+                                anim: 0.0,
+                                cooldown: 0.6,
+                                state_time: 0.0,
+                                dead_time: 0.0,
+                                alive: true,
+                            });
+                        }
+                        imp_count += 1;
+                    }
                     'b' => barrels.push(Barrel {
                         pos,
                         health: 22,
                         alive: true,
                         fade: 0.0,
                     }),
-                    'm' => pickups.push(Pickup {
-                        pos,
-                        kind: PickupKind::Medkit,
-                        taken: false,
-                    }),
-                    'a' => pickups.push(Pickup {
-                        pos,
-                        kind: PickupKind::Ammo,
-                        taken: false,
-                    }),
-                    's' => pickups.push(Pickup {
-                        pos,
-                        kind: PickupKind::Shells,
-                        taken: false,
-                    }),
+                    'm' | 'a' | 's' => {
+                        if difficulty.spawns_pickup(pickup_count) {
+                            let kind = match ch {
+                                'm' => PickupKind::Medkit,
+                                'a' => PickupKind::Ammo,
+                                _ => PickupKind::Shells,
+                            };
+                            pickups.push(Pickup {
+                                pos,
+                                kind,
+                                taken: false,
+                            });
+                        }
+                        pickup_count += 1;
+                    }
+                    // The shotgun always spawns: without it the harder skills
+                    // would be unwinnable rather than hard.
                     'g' => pickups.push(Pickup {
                         pos,
                         kind: PickupKind::Shotgun,
@@ -267,6 +512,8 @@ impl Game {
 
         let total_enemies = enemies.len();
         Self {
+            level,
+            difficulty,
             map,
             player: Player {
                 pos: spawn,
@@ -293,13 +540,161 @@ impl Game {
             kills: 0,
             total_enemies,
             map_open: false,
+            sounds: Vec::new(),
             rng: Rng::new(0xD00D_1234_5678_9ABC),
         }
+    }
+
+    /// Capture the whole level so it can be written to disk and resumed later.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            level: self.level,
+            difficulty: self.difficulty,
+            total_enemies: self.total_enemies,
+            time: self.time,
+            kills: self.kills,
+            player: PlayerSnapshot {
+                pos: self.player.pos,
+                angle: self.player.angle,
+                health: self.player.health,
+                bullets: self.player.bullets,
+                shells: self.player.shells,
+                weapon: self.player.weapon,
+                has_shotgun: self.player.has_shotgun,
+            },
+            enemies: self
+                .enemies
+                .iter()
+                .map(|e| EnemySnapshot {
+                    pos: e.pos,
+                    health: e.health,
+                    state: e.state,
+                    anim: e.anim,
+                    cooldown: e.cooldown,
+                    state_time: e.state_time,
+                    dead_time: e.dead_time,
+                    alive: e.alive,
+                })
+                .collect(),
+            barrels: self
+                .barrels
+                .iter()
+                .map(|b| BarrelSnapshot {
+                    pos: b.pos,
+                    health: b.health,
+                    alive: b.alive,
+                    fade: b.fade,
+                })
+                .collect(),
+            pickups: self
+                .pickups
+                .iter()
+                .map(|p| PickupSnapshot {
+                    pos: p.pos,
+                    kind: p.kind,
+                    taken: p.taken,
+                })
+                .collect(),
+            doors: self
+                .map
+                .door_states()
+                .into_iter()
+                .map(|(x, y, open, phase, timer)| DoorSnapshot {
+                    x,
+                    y,
+                    open,
+                    phase,
+                    timer,
+                })
+                .collect(),
+        }
+    }
+
+    /// Rebuild a level from a snapshot, keeping every value inside the range
+    /// the game itself can produce.
+    pub fn from_snapshot(s: Snapshot) -> Game {
+        let mut game = Game::with_difficulty(s.level, s.difficulty);
+        game.total_enemies = s.total_enemies.max(s.enemies.len());
+        game.time = s.time.max(0.0);
+        game.kills = s.kills.min(game.total_enemies);
+        game.player.pos = s.player.pos;
+        game.player.angle = s.player.angle.rem_euclid(std::f32::consts::TAU);
+        game.player.health = s.player.health.clamp(1, 100);
+        game.player.bullets = s.player.bullets.clamp(0, 200);
+        game.player.shells = s.player.shells.clamp(0, 60);
+        game.player.weapon = s.player.weapon;
+        game.player.has_shotgun = s.player.has_shotgun || s.player.weapon == Weapon::Shotgun;
+        game.player.cooldown = 0.0;
+        game.enemies = s
+            .enemies
+            .into_iter()
+            .map(|e| Enemy {
+                pos: e.pos,
+                health: e.health,
+                state: e.state,
+                anim: e.anim,
+                cooldown: e.cooldown,
+                state_time: e.state_time,
+                dead_time: e.dead_time,
+                alive: e.alive,
+            })
+            .collect();
+        game.barrels = s
+            .barrels
+            .into_iter()
+            .map(|b| Barrel {
+                pos: b.pos,
+                health: b.health,
+                alive: b.alive,
+                fade: b.fade,
+            })
+            .collect();
+        game.pickups = s
+            .pickups
+            .into_iter()
+            .map(|p| Pickup {
+                pos: p.pos,
+                kind: p.kind,
+                taken: p.taken,
+            })
+            .collect();
+        let doors: Vec<(i32, i32, f32, u8, f32)> = s
+            .doors
+            .iter()
+            .map(|d| (d.x, d.y, d.open, d.phase, d.timer))
+            .collect();
+        game.map.restore_door_states(&doors);
+        game
+    }
+
+    pub fn level_name(&self) -> &'static str {
+        LEVELS[self.level].name
     }
 
     pub fn message(&mut self, text: impl Into<String>) {
         self.messages.insert(0, (text.into(), 3.5));
         self.messages.truncate(3);
+    }
+
+    pub fn take_sounds(&mut self) -> Vec<SoundRequest> {
+        std::mem::take(&mut self.sounds)
+    }
+
+    /// Play an effect positioned in the world, panned relative to the camera.
+    fn play_at(&mut self, id: SoundId, pos: Vec2, gain: f32) {
+        let rel = pos - self.player.pos;
+        let dist = rel.len();
+        if dist > 24.0 {
+            return;
+        }
+        let right = Vec2::from_angle(self.player.angle).perp();
+        let pan = if dist > 0.4 {
+            rel.norm().dot(right).clamp(-1.0, 1.0) * 0.85
+        } else {
+            0.0
+        };
+        let gain = gain / (1.0 + dist * 0.22);
+        self.sounds.push(SoundRequest { id, gain, pan });
     }
 
     pub fn update(&mut self, dt: f32, input: &Input) {
@@ -311,7 +706,8 @@ impl Game {
         self.messages.retain(|m| m.1 > 0.0);
 
         if input.restart {
-            *self = Game::new();
+            let level = self.level;
+            *self = Game::with_difficulty(level, self.difficulty);
             return;
         }
         if input.toggle_map {
@@ -335,6 +731,9 @@ impl Game {
         self.handle_movement(dt, input);
         self.handle_weapons(dt, input);
         self.map.update(dt, self.player.pos);
+        for pos in std::mem::take(&mut self.map.closed_doors) {
+            self.play_at(SoundId::DoorClose, pos, 0.85);
+        }
         self.update_enemies(dt);
         self.update_projectiles(dt);
         self.update_pickups();
@@ -367,6 +766,14 @@ impl Game {
         }
         if input.strafe_r {
             wish += right;
+        }
+        let (axis_forward, axis_strafe) = input.move_axis;
+        if axis_forward.abs() > 1e-3 || axis_strafe.abs() > 1e-3 {
+            wish += fwd * axis_forward + right * axis_strafe;
+        }
+        // Diagonals (and a full stick plus a key) must not move faster than forward.
+        if wish.len() > 1.0 {
+            wish = wish.norm();
         }
         let speed = if input.run { RUN_SPEED } else { WALK_SPEED };
         if wish.len() > 1e-4 {
@@ -426,7 +833,10 @@ impl Game {
 
         if input.use_pressed {
             match self.map.use_at(self.player.pos, self.player.angle) {
-                UseOutcome::Opened => {}
+                UseOutcome::Opened => {
+                    let pos = self.player.pos + Vec2::from_angle(self.player.angle) * 0.9;
+                    self.play_at(SoundId::DoorOpen, pos, 0.9);
+                }
                 UseOutcome::Exit => {
                     self.state = GameState::Won;
                     self.message("EXIT ACTIVATED");
@@ -448,12 +858,23 @@ impl Game {
         if self.player.ammo() <= 0 {
             self.player.cooldown = 0.35;
             self.message("OUT OF AMMO");
+            let pos = self.player.pos;
+            self.play_at(SoundId::Empty, pos, 0.8);
             return;
         }
         match weapon {
             Weapon::Pistol => self.player.bullets -= 1,
             Weapon::Shotgun => self.player.shells -= 1,
         }
+        let sound = match weapon {
+            Weapon::Pistol => SoundId::Pistol,
+            Weapon::Shotgun => SoundId::Shotgun,
+        };
+        self.sounds.push(SoundRequest {
+            id: sound,
+            gain: 0.9,
+            pan: 0.0,
+        });
         self.player.cooldown = weapon.cooldown();
         self.player.fire_anim = 1.0;
         self.player.muzzle = 0.07;
@@ -516,16 +937,26 @@ impl Game {
             return false;
         }
         if let Some((_, i)) = best {
-            let e = &mut self.enemies[i];
-            e.health -= damage;
-            if e.health <= 0 {
-                e.alive = false;
-                e.state = EnemyState::Dead;
-                e.dead_time = 0.0;
+            let pos = self.enemies[i].pos;
+            let died = {
+                let e = &mut self.enemies[i];
+                e.health -= damage;
+                if e.health <= 0 {
+                    e.alive = false;
+                    e.state = EnemyState::Dead;
+                    e.dead_time = 0.0;
+                    true
+                } else {
+                    e.state = EnemyState::Pain;
+                    e.state_time = 0.22;
+                    false
+                }
+            };
+            if died {
                 self.kills += 1;
+                self.play_at(SoundId::ImpDeath, pos, 0.9);
             } else {
-                e.state = EnemyState::Pain;
-                e.state_time = 0.22;
+                self.play_at(SoundId::ImpPain, pos, 0.75);
             }
             return true;
         }
@@ -533,11 +964,14 @@ impl Game {
     }
 
     fn update_enemies(&mut self, dt: f32) {
+        let speed_scale = self.difficulty.enemy_speed();
+        let cooldown_scale = self.difficulty.enemy_cooldown();
         let map = &self.map;
         let player_pos = self.player.pos;
         let playing = self.state == GameState::Playing;
         let mut damage_to_player = 0;
         let mut shots = Vec::new();
+        let mut sounds: Vec<(SoundId, Vec2)> = Vec::new();
 
         for e in self.enemies.iter_mut() {
             if !e.alive {
@@ -556,6 +990,7 @@ impl Game {
                     if los && dist < 14.0 {
                         e.state = EnemyState::Chase;
                         e.anim = 0.0;
+                        sounds.push((SoundId::ImpSight, e.pos));
                     }
                 }
                 EnemyState::Pain => {
@@ -576,23 +1011,25 @@ impl Game {
                     if !los {
                         // Wander toward the last known player position.
                         let dir = to_player.norm();
-                        map.try_move(&mut e.pos, dir * 1.0 * dt, 0.3);
+                        map.try_move(&mut e.pos, dir * 1.0 * speed_scale * dt, 0.3);
                     } else if dist > 1.35 {
                         let dir = to_player.norm();
-                        map.try_move(&mut e.pos, dir * 1.75 * dt, 0.3);
+                        map.try_move(&mut e.pos, dir * 1.75 * speed_scale * dt, 0.3);
                     }
                     if e.cooldown <= 0.0 && los {
                         if dist < 1.6 {
                             damage_to_player += 9;
-                            e.cooldown = 1.1;
+                            e.cooldown = 1.1 * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.32;
+                            sounds.push((SoundId::ImpAttack, e.pos));
                         } else if dist < 10.0 {
                             let aim = to_player.norm();
                             shots.push((e.pos + aim * 0.35, aim * 5.2));
-                            e.cooldown = 2.0;
+                            e.cooldown = 2.0 * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.4;
+                            sounds.push((SoundId::ImpAttack, e.pos));
                         }
                     }
                 }
@@ -606,6 +1043,9 @@ impl Game {
                 vel,
                 life: 4.0,
             });
+        }
+        for (id, pos) in sounds {
+            self.play_at(id, pos, 0.8);
         }
         if damage_to_player > 0 {
             self.damage_player(damage_to_player);
@@ -639,6 +1079,11 @@ impl Game {
 
     fn update_pickups(&mut self) {
         let pos = self.player.pos;
+        let bonus = self.difficulty.pickup_bonus();
+        // Health and ammo per pickup, scaled by skill but never below one unit.
+        let medkit = ((25.0 * bonus).round() as i32).max(1);
+        let clip = ((20.0 * bonus).round() as i32).max(1);
+        let shells = ((8.0 * bonus).round() as i32).max(1);
         let mut taken: Vec<usize> = Vec::new();
         let mut messages: Vec<&'static str> = Vec::new();
         for i in 0..self.pickups.len() {
@@ -650,34 +1095,36 @@ impl Game {
                     if self.player.health >= 100 {
                         continue;
                     }
-                    self.player.health = (self.player.health + 25).min(100);
+                    self.player.health = (self.player.health + medkit).min(100);
                     messages.push("PICKED UP A MEDKIT");
                 }
                 PickupKind::Ammo => {
                     if self.player.bullets >= 200 {
                         continue;
                     }
-                    self.player.bullets = (self.player.bullets + 20).min(200);
+                    self.player.bullets = (self.player.bullets + clip).min(200);
                     messages.push("PICKED UP A CLIP");
                 }
                 PickupKind::Shells => {
                     if self.player.shells >= 60 {
                         continue;
                     }
-                    self.player.shells = (self.player.shells + 8).min(60);
+                    self.player.shells = (self.player.shells + shells).min(60);
                     messages.push("PICKED UP SHELLS");
                 }
                 PickupKind::Shotgun => {
                     self.player.has_shotgun = true;
                     self.player.weapon = Weapon::Shotgun;
-                    self.player.shells = (self.player.shells + 8).min(60);
+                    self.player.shells = (self.player.shells + shells).min(60);
                     messages.push("YOU GOT THE SHOTGUN!");
                 }
             }
             taken.push(i);
         }
-        for i in taken {
+        for &i in &taken {
             self.pickups[i].taken = true;
+            let pos = self.pickups[i].pos;
+            self.play_at(SoundId::Pickup, pos, 0.75);
         }
         for m in messages {
             self.message(m);
@@ -707,6 +1154,8 @@ impl Game {
 
     fn explode(&mut self, pos: Vec2) {
         let player_dist = pos.dist(self.player.pos);
+        self.play_at(SoundId::Explosion, pos, 1.0);
+        let mut killed = Vec::new();
         for e in &mut self.enemies {
             if e.alive && e.pos.dist(pos) < 2.6 {
                 e.health -= 55;
@@ -714,12 +1163,16 @@ impl Game {
                     e.alive = false;
                     e.state = EnemyState::Dead;
                     e.dead_time = 0.0;
-                    self.kills += 1;
+                    killed.push(e.pos);
                 } else {
                     e.state = EnemyState::Pain;
                     e.state_time = 0.3;
                 }
             }
+        }
+        self.kills += killed.len();
+        for pos in killed {
+            self.play_at(SoundId::ImpDeath, pos, 0.85);
         }
         for b in &mut self.barrels {
             if b.alive && b.pos.dist(pos) < 2.2 && b.pos.dist(pos) > 0.01 {
@@ -736,8 +1189,12 @@ impl Game {
         if self.state != GameState::Playing {
             return;
         }
+        let amount = ((amount as f32) * self.difficulty.damage_taken()).round() as i32;
+        let amount = amount.max(1);
         self.player.health -= amount;
         self.player.hurt = (self.player.hurt + amount as f32 / 26.0).min(1.0);
+        let pos = self.player.pos;
+        self.play_at(SoundId::PlayerHurt, pos, 1.0);
         if self.player.health <= 0 {
             self.player.health = 0;
             self.state = GameState::Dead;
@@ -813,7 +1270,7 @@ impl Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
@@ -829,7 +1286,7 @@ mod tests {
 
     #[test]
     fn spawning_reads_the_level() {
-        let g = Game::new();
+        let g = Game::new(0);
         assert_eq!(g.total_enemies, 12);
         assert_eq!(g.player.health, 100);
         assert_eq!(g.player.pos, Vec2::new(3.5, 2.5));
@@ -838,7 +1295,7 @@ mod tests {
 
     #[test]
     fn player_cannot_walk_through_walls() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         freeze_enemies(&mut g);
         let mut input = Input {
             back: true,
@@ -862,7 +1319,7 @@ mod tests {
 
     #[test]
     fn shooting_kills_an_imp() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         // Stand right in front of the first imp and fire until it dies.
         g.player.pos = Vec2::new(17.0, 2.5);
         g.player.angle = 0.0;
@@ -880,7 +1337,7 @@ mod tests {
 
     #[test]
     fn shotgun_pickup_switches_weapon() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         g.player.pos = Vec2::new(21.5, 17.5);
         g.update(1.0 / 60.0, &Input::default());
         assert!(g.player.has_shotgun);
@@ -890,7 +1347,7 @@ mod tests {
 
     #[test]
     fn doors_open_when_used() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         g.player.pos = Vec2::new(6.6, 5.5);
         g.player.angle = 0.0;
         g.update(
@@ -909,7 +1366,7 @@ mod tests {
 
     #[test]
     fn exit_switch_wins_the_level() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         g.player.pos = Vec2::new(24.5, 22.4);
         g.player.angle = std::f32::consts::FRAC_PI_2;
         g.update(
@@ -924,7 +1381,7 @@ mod tests {
 
     #[test]
     fn imps_hurt_the_player() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         g.player.pos = Vec2::new(19.5, 2.5);
         g.player.angle = std::f32::consts::PI;
         for _ in 0..600 {
@@ -937,8 +1394,274 @@ mod tests {
     }
 
     #[test]
+    fn shooting_raises_a_gunshot_sound() {
+        let mut g = Game::new(0);
+        let _ = g.take_sounds();
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                fire: true,
+                ..Default::default()
+            },
+        );
+        let sounds = g.take_sounds();
+        assert!(
+            sounds.iter().any(|s| s.id == SoundId::Pistol),
+            "no pistol sound emitted"
+        );
+        assert!(g.sounds.is_empty(), "take_sounds should drain the queue");
+    }
+
+    #[test]
+    fn doors_raise_open_and_close_sounds() {
+        let mut g = Game::new(0);
+        g.player.pos = Vec2::new(6.6, 5.5);
+        g.player.angle = 0.0;
+        let _ = g.take_sounds();
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                use_pressed: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            g.take_sounds().iter().any(|s| s.id == SoundId::DoorOpen),
+            "no door sound on use"
+        );
+        // Run until the door has finished its open timer and closed again.
+        let mut closed = false;
+        for _ in 0..600 {
+            g.update(1.0 / 60.0, &Input::default());
+            if g.take_sounds().iter().any(|s| s.id == SoundId::DoorClose) {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed, "no door-close sound after the auto-close timer");
+    }
+
+    #[test]
+    fn imps_growl_when_they_spot_the_player() {
+        let mut g = Game::new(0);
+        g.player.pos = Vec2::new(17.2, 2.5);
+        let _ = g.take_sounds();
+        g.update(1.0 / 60.0, &Input::default());
+        let sounds = g.take_sounds();
+        assert!(
+            sounds.iter().any(|s| s.id == SoundId::ImpSight),
+            "imp did not growl on sight"
+        );
+        for s in sounds {
+            assert!(s.gain > 0.0 && s.pan >= -1.0 && s.pan <= 1.0);
+        }
+    }
+
+    #[test]
+    fn every_level_loads_with_entities() {
+        for (i, level) in LEVELS.iter().enumerate() {
+            let g = Game::new(i);
+            assert_eq!(g.level_name(), level.name);
+            assert!(g.total_enemies > 0, "{} has no enemies", level.name);
+            assert_eq!(g.player.health, 100);
+            assert_eq!(g.level, i);
+        }
+    }
+
+    #[test]
+    fn restart_keeps_the_current_level() {
+        let mut g = Game::new(1);
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                restart: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(g.level, 1);
+        assert_eq!(g.state, GameState::Playing);
+    }
+
+    #[test]
+    fn barrels_explode_with_a_sound() {
+        let mut g = Game::new(0);
+        g.player.pos = Vec2::new(3.4, 4.5);
+        g.player.angle = 0.0;
+        let _ = g.take_sounds();
+        let input = Input {
+            fire: true,
+            ..Default::default()
+        };
+        let mut heard = Vec::new();
+        for _ in 0..150 {
+            g.update(1.0 / 60.0, &input);
+            heard.extend(g.take_sounds());
+        }
+        assert!(g.barrels.iter().any(|b| !b.alive), "barrel survived");
+        assert!(
+            heard.iter().any(|s| s.id == SoundId::Explosion),
+            "no explosion sound"
+        );
+    }
+
+    #[test]
+    fn pickups_and_empty_clicks_are_audible() {
+        let mut g = Game::new(0);
+        g.player.pos = Vec2::new(21.5, 17.5);
+        let _ = g.take_sounds();
+        g.update(1.0 / 60.0, &Input::default());
+        assert!(
+            g.take_sounds().iter().any(|s| s.id == SoundId::Pickup),
+            "no pickup sound"
+        );
+
+        g.player.weapon = Weapon::Pistol;
+        g.player.bullets = 0;
+        g.player.cooldown = 0.0;
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                fire: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            g.take_sounds().iter().any(|s| s.id == SoundId::Empty),
+            "no empty-click sound"
+        );
+    }
+
+    #[test]
+    fn difficulty_scales_demons_and_damage() {
+        let easy = Game::with_difficulty(0, Difficulty::Easy);
+        let hard = Game::with_difficulty(0, Difficulty::Hard);
+        assert!(easy.enemies[0].health < hard.enemies[0].health);
+        assert_eq!(hard.enemies[0].health, Difficulty::Hard.enemy_health());
+        assert_eq!(hard.difficulty, Difficulty::Hard);
+
+        let mut easy = Game::with_difficulty(0, Difficulty::Easy);
+        let mut hard = Game::with_difficulty(0, Difficulty::Hard);
+        easy.damage_player(20);
+        hard.damage_player(20);
+        assert!(
+            easy.player.health > hard.player.health,
+            "easy {} vs hard {}",
+            easy.player.health,
+            hard.player.health
+        );
+    }
+
+    /// Emp: pistol shots needed to drop the first imp on the entryway row.
+    fn shots_to_kill(difficulty: Difficulty) -> usize {
+        let mut g = Game::with_difficulty(0, difficulty);
+        g.player.pos = Vec2::new(17.0, 2.5);
+        g.player.angle = 0.0;
+        let target = g
+            .enemies
+            .iter()
+            .filter(|e| (e.pos.y - 2.5).abs() < 0.6)
+            .map(|e| e.pos)
+            .min_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("an imp straight ahead");
+        g.enemies.retain(|e| e.pos == target);
+
+        let mut shots = 0;
+        while g.enemies.iter().any(|e| e.alive) && shots < 20 {
+            g.hitscan(Vec2::new(1.0, 0.0), 14);
+            shots += 1;
+        }
+        shots
+    }
+
+    #[test]
+    fn harder_skills_take_more_shots() {
+        assert!(
+            shots_to_kill(Difficulty::Easy) < shots_to_kill(Difficulty::Hard),
+            "hard should need more pistol hits"
+        );
+    }
+
+    #[test]
+    fn easy_spawns_fewer_demons_and_hard_has_less_supply() {
+        let easy = Game::with_difficulty(0, Difficulty::Easy);
+        let normal = Game::with_difficulty(0, Difficulty::Normal);
+        let hard = Game::with_difficulty(0, Difficulty::Hard);
+
+        assert!(
+            easy.total_enemies < normal.total_enemies,
+            "easy {} vs normal {}",
+            easy.total_enemies,
+            normal.total_enemies
+        );
+        assert_eq!(normal.total_enemies, hard.total_enemies);
+        assert_eq!(normal.enemies.len(), normal.total_enemies);
+
+        assert!(
+            hard.pickups.len() < normal.pickups.len(),
+            "hard {} vs normal {}",
+            hard.pickups.len(),
+            normal.pickups.len()
+        );
+        assert_eq!(easy.pickups.len(), normal.pickups.len());
+        for g in [&easy, &normal, &hard] {
+            assert!(
+                g.pickups.iter().any(|p| p.kind == PickupKind::Shotgun),
+                "the shotgun must always spawn"
+            );
+        }
+    }
+
+    #[test]
+    fn pickup_values_scale_with_skill() {
+        fn heal_on(difficulty: Difficulty) -> i32 {
+            let mut g = Game::with_difficulty(0, difficulty);
+            let pos = g
+                .pickups
+                .iter()
+                .find(|p| p.kind == PickupKind::Medkit)
+                .expect("a medkit on the entryway")
+                .pos;
+            g.player.health = 40;
+            g.player.pos = pos;
+            g.update(1.0 / 60.0, &Input::default());
+            g.player.health - 40
+        }
+        assert!(
+            heal_on(Difficulty::Easy) > heal_on(Difficulty::Hard),
+            "easy medkits should heal more than hard ones"
+        );
+        assert!(Difficulty::Easy.pickup_bonus() > Difficulty::Hard.pickup_bonus());
+        assert!(Difficulty::Hard.pickup_bonus() > 0.0);
+    }
+
+    #[test]
+    fn restart_keeps_the_difficulty() {
+        let mut g = Game::with_difficulty(1, Difficulty::Hard);
+        g.update(
+            1.0 / 60.0,
+            &Input {
+                restart: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(g.difficulty, Difficulty::Hard);
+        assert_eq!(g.level, 1);
+        assert_eq!(g.enemies[0].health, Difficulty::Hard.enemy_health());
+    }
+
+    #[test]
+    fn difficulty_names_and_indices_match() {
+        for (i, d) in Difficulty::ALL.iter().enumerate() {
+            assert_eq!(d.index(), i);
+            assert_eq!(Difficulty::from_index(i), *d);
+            assert!(!d.name().is_empty() && !d.short().is_empty());
+        }
+        assert_eq!(Difficulty::from_index(99), Difficulty::Hard);
+    }
+
+    #[test]
     fn restart_resets_the_game() {
-        let mut g = Game::new();
+        let mut g = Game::new(0);
         g.player.health = 1;
         g.update(
             1.0 / 60.0,
@@ -949,5 +1672,6 @@ mod tests {
         );
         assert_eq!(g.player.health, 100);
         assert_eq!(g.state, GameState::Playing);
+        assert_eq!(g.difficulty, Difficulty::Normal);
     }
 }

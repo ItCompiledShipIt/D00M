@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 cpal = "0.18.2"
+gilrs = "0.11.2"
 softbuffer = "0.4"
 winit = "0.30"
 

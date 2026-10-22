@@ -1,6 +1,6 @@
 //! A hand-rolled 5x7 bitmap font so the HUD needs no font files or crates.
 
-use crate::gfx::Color;
+use crate::gfx::{Color, blend};
 
 /// Row bit patterns, MSB is the leftmost pixel of the 5-wide cell.
 fn glyph(c: char) -> Option<[u8; 7]> {
@@ -149,12 +149,19 @@ fn glyph(c: char) -> Option<[u8; 7]> {
         '\'' => [
             0b00100, 0b00100, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000,
         ],
+        '<' => [
+            0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010,
+        ],
+        '>' => [
+            0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000,
+        ],
         _ => return None,
     };
     Some(g)
 }
 
 pub const GLYPH_W: usize = 5;
+pub const GLYPH_H: usize = 7;
 
 pub fn text_width(text: &str, scale: usize) -> usize {
     text.chars().count() * (GLYPH_W + 1) * scale
@@ -213,4 +220,46 @@ pub fn draw_centered(
 ) {
     let w = text_width(text, scale) as i32;
     draw(buf, buf_w, buf_h, cx - w / 2, y, text, color, scale);
+}
+
+/// Draw text filled with a vertical gradient, for titles and the logo.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_gradient(
+    buf: &mut [u32],
+    buf_w: usize,
+    buf_h: usize,
+    x: i32,
+    y: i32,
+    text: &str,
+    top: Color,
+    bottom: Color,
+    scale: usize,
+) {
+    let advance = ((GLYPH_W + 1) * scale) as i32;
+    for (i, ch) in text.chars().enumerate() {
+        let Some(rows) = glyph(ch) else { continue };
+        let gx = x + i as i32 * advance;
+        for (row, bits) in rows.iter().enumerate() {
+            let color = blend(top, bottom, row as f32 / (GLYPH_H - 1) as f32);
+            for col in 0..GLYPH_W {
+                if bits & (1 << (GLYPH_W - 1 - col)) == 0 {
+                    continue;
+                }
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = gx + col as i32 * scale as i32 + sx as i32;
+                        let py = y + row as i32 * scale as i32 + sy as i32;
+                        if px >= 0 && py >= 0 && (px as usize) < buf_w && (py as usize) < buf_h {
+                            buf[py as usize * buf_w + px as usize] = color;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Width of `text` drawn with `draw_gradient`.
+pub fn gradient_width(text: &str, scale: usize) -> usize {
+    text.chars().count() * (GLYPH_W + 1) * scale
 }
