@@ -30,12 +30,38 @@ pub const SPR_AMMO: usize = 11;
 pub const SPR_SHELLS: usize = 12;
 pub const SPR_SHOTGUN_PICKUP: usize = 13;
 pub const SPR_FIREBALL: usize = 14;
+// Second monster: the charging demon.
+pub const SPR_DEMON_WALK0: usize = 15;
+pub const SPR_DEMON_WALK1: usize = 16;
+pub const SPR_DEMON_ATTACK: usize = 17;
+pub const SPR_DEMON_PAIN: usize = 18;
+pub const SPR_DEMON_CORPSE: usize = 19;
+// Third monster: the hell knight.
+pub const SPR_KNIGHT_WALK0: usize = 20;
+pub const SPR_KNIGHT_WALK1: usize = 21;
+pub const SPR_KNIGHT_ATTACK: usize = 22;
+pub const SPR_KNIGHT_PAIN: usize = 23;
+pub const SPR_KNIGHT_CORPSE: usize = 24;
+// Projectiles and pickups.
+pub const SPR_HELLFIRE: usize = 25;
+pub const SPR_ROCKET: usize = 26;
+pub const SPR_CHAINGUN_PICKUP: usize = 27;
+pub const SPR_LAUNCHER_PICKUP: usize = 28;
+pub const SPR_ROCKETS_PICKUP: usize = 29;
+// Explosion frames: flash, fireball, smoke.
+pub const SPR_BOOM0: usize = 30;
+pub const SPR_BOOM1: usize = 31;
+pub const SPR_BOOM2: usize = 32;
 
 // --- Weapon texture ids ----------------------------------------------------
 pub const WEAPON_PISTOL: usize = 0;
 pub const WEAPON_PISTOL_FIRE: usize = 1;
 pub const WEAPON_SHOTGUN: usize = 2;
 pub const WEAPON_SHOTGUN_FIRE: usize = 3;
+pub const WEAPON_CHAINGUN: usize = 4;
+pub const WEAPON_CHAINGUN_FIRE: usize = 5;
+pub const WEAPON_LAUNCHER: usize = 6;
+pub const WEAPON_LAUNCHER_FIRE: usize = 7;
 
 pub struct Textures {
     pub walls: Vec<Tex>,
@@ -57,7 +83,7 @@ impl Textures {
             crate_wall(),
         ];
 
-        let mut sprites = Vec::with_capacity(15);
+        let mut sprites = Vec::with_capacity(33);
         for w in 0..4 {
             sprites.push(imp_walk(w));
         }
@@ -72,6 +98,26 @@ impl Textures {
         sprites.push(shells());
         sprites.push(shotgun_pickup());
         sprites.push(fireball());
+        for w in 0..2 {
+            sprites.push(demon_walk(w));
+        }
+        sprites.push(demon_attack());
+        sprites.push(demon_pain());
+        sprites.push(demon_corpse());
+        for w in 0..2 {
+            sprites.push(knight_walk(w));
+        }
+        sprites.push(knight_attack());
+        sprites.push(knight_pain());
+        sprites.push(knight_corpse());
+        sprites.push(hellfire());
+        sprites.push(rocket());
+        sprites.push(chaingun_pickup());
+        sprites.push(launcher_pickup());
+        sprites.push(rockets_pickup());
+        for stage in 0..3 {
+            sprites.push(explosion_frame(stage));
+        }
 
         Self {
             walls,
@@ -83,6 +129,10 @@ impl Textures {
                 pistol(true),
                 shotgun_weapon(false),
                 shotgun_weapon(true),
+                chaingun(false),
+                chaingun(true),
+                launcher(false),
+                launcher(true),
             ],
         }
     }
@@ -619,6 +669,90 @@ fn shotgun_weapon(firing: bool) -> Tex {
     t
 }
 
+fn explosion_frame(stage: usize) -> Tex {
+    let mut t = Tex::new(64, 64);
+    let c = 32.0f32;
+    match stage {
+        // White-hot flash with orange petals.
+        0 => {
+            for i in 0..24 {
+                let a = i as f32 / 24.0 * std::f32::consts::TAU;
+                let n = noise(i, 3, 331) as f32 / 255.0;
+                let r = 7.0 + n * 7.0;
+                t.ellipse(
+                    c + a.cos() * r,
+                    c + a.sin() * r,
+                    12.0,
+                    12.0,
+                    rgb(238, 118, 26),
+                );
+            }
+            t.ellipse(c, c, 17.0, 17.0, rgb(255, 168, 40));
+            t.ellipse(c, c, 12.0, 12.0, rgb(255, 222, 108));
+            t.ellipse(c, c, 7.0, 7.0, rgb(255, 252, 228));
+        }
+        // Expanding fireball, cooling from the outside in.
+        1 => {
+            t.ellipse(c, c, 18.0, 18.0, rgb(150, 44, 18));
+            t.ellipse(c, c, 12.0, 12.0, rgb(206, 92, 26));
+            for i in 0..24 {
+                let a = i as f32 / 24.0 * std::f32::consts::TAU;
+                let n = noise(i, 7, 337) as f32 / 255.0;
+                let r = 12.0 + n * 8.0;
+                t.ellipse(
+                    c + a.cos() * r,
+                    c + a.sin() * r,
+                    11.0,
+                    11.0,
+                    rgb(176, 54, 20),
+                );
+            }
+            for i in 0..14 {
+                let a = i as f32 / 14.0 * std::f32::consts::TAU;
+                let n = noise(i, 11, 343) as f32 / 255.0;
+                let r = 8.0 + n * 8.0;
+                t.ellipse(
+                    c + a.cos() * r,
+                    c + a.sin() * r,
+                    5.5,
+                    5.5,
+                    rgb(226, 122, 34),
+                );
+            }
+            for i in 0..7 {
+                let a = i as f32 / 7.0 * std::f32::consts::TAU + 0.4;
+                let n = noise(i, 13, 347) as f32 / 255.0;
+                let r = 3.0 + n * 5.0;
+                t.ellipse(c + a.cos() * r, c + a.sin() * r, 3.5, 3.5, rgb(80, 52, 44));
+            }
+        }
+        // Drifting soot and the last embers.
+        _ => {
+            t.ellipse(c, c, 16.0, 15.0, rgb(54, 50, 54));
+            t.ellipse(c, c - 1.0, 10.0, 9.0, rgb(72, 68, 72));
+            for i in 0..16 {
+                let a = i as f32 / 16.0 * std::f32::consts::TAU;
+                let n = noise(i, 17, 353) as f32 / 255.0;
+                let r = 8.0 + n * 18.0;
+                t.ellipse(
+                    c + a.cos() * r,
+                    c + a.sin() * r - 2.0,
+                    6.0,
+                    6.0,
+                    rgb(58, 55, 58),
+                );
+            }
+            for i in 0..6 {
+                let a = i as f32 / 6.0 * std::f32::consts::TAU + 1.1;
+                let n = noise(i, 19, 359) as f32 / 255.0;
+                let r = 4.0 + n * 14.0;
+                t.ellipse(c + a.cos() * r, c + a.sin() * r, 2.0, 2.0, rgb(196, 88, 36));
+            }
+        }
+    }
+    t
+}
+
 fn muzzle_flash(t: &mut Tex, cx: f32, cy: f32, scale: f32) {
     let outer = rgb(255, 158, 32);
     let mid = rgb(255, 216, 92);
@@ -639,6 +773,340 @@ fn muzzle_flash(t: &mut Tex, cx: f32, cy: f32, scale: f32) {
     t.ellipse(cx, cy, 4.0 * scale, 4.0 * scale, core);
 }
 
+// --- The charging demon ----------------------------------------------------
+
+fn demon_walk(frame: usize) -> Tex {
+    let mut t = Tex::new(64, 64);
+    let bob = [0.0, -1.5][frame % 2];
+    let leg = [0.0, 3.0][frame % 2];
+    // Charred, ash-grey hide: deliberately nothing like the brick-red imp.
+    let hide = rgb(78, 64, 62);
+    let dark = rgb(44, 36, 36);
+    let light = rgb(108, 92, 88);
+    let ember = rgb(206, 74, 34);
+
+    // Legs and feet.
+    t.ellipse(24.0, 50.0 + leg, 7.5, 10.0, dark);
+    t.ellipse(40.0, 50.0 - leg, 7.5, 10.0, dark);
+    t.ellipse(22.0, 60.0, 8.0, 3.0, rgb(52, 46, 44));
+    t.ellipse(42.0, 60.0, 8.0, 3.0, rgb(52, 46, 44));
+    // Hunched, heavy torso.
+    t.ellipse(32.0, 36.0 + bob, 19.0, 16.0, hide);
+    t.ellipse(32.0, 31.0 + bob, 12.0, 9.0, light);
+    // Shoulders and arms.
+    t.ellipse(13.0, 32.0 + bob, 8.5, 12.0, dark);
+    t.ellipse(51.0, 32.0 + bob, 8.5, 12.0, dark);
+    t.ellipse(12.0, 44.0 + bob, 6.0, 6.0, hide);
+    t.ellipse(52.0, 44.0 + bob, 6.0, 6.0, hide);
+    // Ember cracks splitting the charred chest.
+    for (x, y, dx, dy) in [
+        (26, 34, 3, 5),
+        (32, 33, -2, 6),
+        (38, 35, 4, 4),
+        (23, 41, 2, 4),
+    ] {
+        t.line(x, y + bob as i32, x + dx, y + dy + bob as i32, ember);
+    }
+    // Low head with a maw of teeth.
+    t.ellipse(32.0, 18.0 + bob, 12.0, 9.0, hide);
+    t.ellipse(32.0, 22.0 + bob, 9.0, 5.0, rgb(56, 14, 14));
+    for i in 0..5 {
+        t.rect(25 + i * 3, 19 + bob as i32, 2, 4, rgb(240, 234, 212));
+    }
+    for i in 0..4 {
+        t.rect(27 + i * 3, 26 + bob as i32, 2, 3, rgb(222, 214, 192));
+    }
+    // Pale, blank eyes: the imp's are yellow.
+    t.rect(23, 13 + bob as i32, 4, 2, rgb(214, 234, 240));
+    t.rect(37, 13 + bob as i32, 4, 2, rgb(214, 234, 240));
+    // Stubby horns.
+    t.line(22, 11, 16, 2, rgb(216, 204, 178));
+    t.line(42, 11, 48, 2, rgb(216, 204, 178));
+    t.vertical_gradient(1.08, 0.82);
+    t
+}
+
+fn demon_attack() -> Tex {
+    let mut t = demon_walk(0);
+    // Arms reaching out with claws.
+    t.ellipse(14.0, 40.0, 7.0, 9.0, rgb(56, 46, 44));
+    t.ellipse(50.0, 40.0, 7.0, 9.0, rgb(56, 46, 44));
+    for i in 0..3 {
+        t.line(10, 46 - i * 3, 6, 50 - i * 4, rgb(244, 238, 214));
+        t.line(54, 46 - i * 3, 58, 50 - i * 4, rgb(244, 238, 214));
+    }
+    // Maw wide open.
+    t.ellipse(32.0, 22.0, 10.0, 7.0, rgb(120, 20, 18));
+    for i in 0..5 {
+        t.rect(25 + i * 3, 17, 2, 4, rgb(248, 244, 224));
+        t.rect(26 + i * 3, 27, 2, 3, rgb(248, 244, 224));
+    }
+    t
+}
+
+fn demon_pain() -> Tex {
+    let mut t = demon_walk(1);
+    t.ellipse(32.0, 18.0, 12.0, 9.0, rgb(96, 80, 76));
+    t.line(23, 11, 27, 15, rgb(255, 250, 236));
+    t.line(27, 11, 23, 15, rgb(255, 250, 236));
+    t.line(37, 11, 41, 15, rgb(255, 250, 236));
+    t.line(41, 11, 37, 15, rgb(255, 250, 236));
+    t.vertical_gradient(1.16, 0.9);
+    t
+}
+
+fn demon_corpse() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 57.0, 26.0, 6.0, rgb(70, 16, 12));
+    t.ellipse(32.0, 54.0, 20.0, 6.0, rgb(66, 54, 50));
+    t.ellipse(22.0, 53.0, 8.0, 4.0, rgb(88, 74, 70));
+    t.ellipse(44.0, 55.0, 7.0, 3.5, rgb(48, 40, 38));
+    for i in 0..5 {
+        t.set(24 + i * 4, 52, rgb(232, 224, 200));
+    }
+    t.line(12, 58, 5, 59, rgb(196, 186, 164));
+    t.line(52, 58, 59, 59, rgb(196, 186, 164));
+    t
+}
+
+// --- The hell knight --------------------------------------------------------
+
+fn knight_walk(frame: usize) -> Tex {
+    let mut t = Tex::new(64, 64);
+    let bob = [0.0, -1.2][frame % 2];
+    let leg = [0.0, 2.5][frame % 2];
+    let armor = rgb(96, 108, 96);
+    let dark = rgb(52, 60, 54);
+    let glow = rgb(150, 240, 150);
+
+    // Legs.
+    t.ellipse(27.0, 48.0 + leg, 6.0, 13.0, dark);
+    t.ellipse(37.0, 48.0 - leg, 6.0, 13.0, dark);
+    t.ellipse(25.0, 60.5, 7.0, 2.5, rgb(40, 44, 42));
+    t.ellipse(39.0, 60.5, 7.0, 2.5, rgb(40, 44, 42));
+    // Chest with plate lines.
+    t.ellipse(32.0, 33.0 + bob, 15.0, 17.0, armor);
+    t.ellipse(32.0, 29.0 + bob, 9.0, 10.0, rgb(126, 138, 122));
+    t.rect(22, 31 + bob as i32, 20, 2, dark);
+    t.rect(23, 39 + bob as i32, 18, 2, dark);
+    t.rect(24, 46 + bob as i32, 16, 2, dark);
+    // Shoulder pads and arms.
+    t.ellipse(14.0, 25.0 + bob, 9.0, 7.0, dark);
+    t.ellipse(50.0, 25.0 + bob, 9.0, 7.0, dark);
+    t.ellipse(14.0, 24.0 + bob, 6.0, 4.0, rgb(122, 134, 118));
+    t.ellipse(50.0, 24.0 + bob, 6.0, 4.0, rgb(122, 134, 118));
+    t.ellipse(11.0, 38.0 + bob, 5.0, 11.0, armor);
+    t.ellipse(53.0, 38.0 + bob, 5.0, 11.0, armor);
+    t.ellipse(11.0, 49.0 + bob, 4.0, 4.0, dark);
+    t.ellipse(53.0, 49.0 + bob, 4.0, 4.0, dark);
+    // Skull head with burning eyes.
+    t.ellipse(32.0, 15.0 + bob, 9.0, 8.0, dark);
+    t.rect(24, 14 + bob as i32, 16, 3, rgb(38, 44, 40));
+    t.rect(26, 16 + bob as i32, 4, 2, glow);
+    t.rect(34, 16 + bob as i32, 4, 2, glow);
+    t.rect(28, 21 + bob as i32, 8, 1, rgb(20, 24, 22));
+    // Horns.
+    t.line(26, 8, 20, 0, rgb(206, 214, 196));
+    t.line(38, 8, 44, 0, rgb(206, 214, 196));
+    t.vertical_gradient(1.05, 0.88);
+    t
+}
+
+fn knight_attack() -> Tex {
+    let mut t = knight_walk(0);
+    // Both hands cupped around green hellfire.
+    t.ellipse(19.0, 36.0, 6.0, 10.0, rgb(58, 66, 58));
+    t.ellipse(45.0, 36.0, 6.0, 10.0, rgb(58, 66, 58));
+    t.ellipse(32.0, 42.0, 8.0, 8.0, rgb(46, 176, 92));
+    t.ellipse(32.0, 42.0, 5.0, 5.0, rgb(126, 244, 150));
+    t.ellipse(32.0, 42.0, 2.4, 2.4, rgb(230, 255, 236));
+    t
+}
+
+fn knight_pain() -> Tex {
+    let mut t = knight_walk(1);
+    t.ellipse(32.0, 15.0, 9.0, 8.0, rgb(112, 122, 112));
+    t.rect(25, 13, 5, 3, rgb(250, 250, 240));
+    t.rect(34, 13, 5, 3, rgb(250, 250, 240));
+    t.vertical_gradient(1.15, 0.9);
+    t
+}
+
+fn knight_corpse() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 57.0, 24.0, 5.0, rgb(30, 40, 32));
+    t.ellipse(32.0, 54.0, 18.0, 5.5, rgb(84, 96, 84));
+    t.rect(20, 51, 10, 2, rgb(52, 60, 54));
+    t.rect(36, 53, 9, 2, rgb(52, 60, 54));
+    t.ellipse(44.0, 55.0, 6.0, 3.0, rgb(96, 108, 96));
+    t.ellipse(24.0, 56.0, 3.0, 2.0, rgb(120, 220, 130));
+    t.line(14, 58, 7, 59, rgb(190, 200, 184));
+    t.line(50, 58, 57, 59, rgb(190, 200, 184));
+    t
+}
+
+// --- Projectiles and weapon pickups ----------------------------------------
+
+fn hellfire() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 32.0, 15.0, 15.0, rgb(20, 128, 58));
+    t.ellipse(32.0, 32.0, 11.0, 11.0, rgb(72, 208, 104));
+    t.ellipse(32.0, 32.0, 7.0, 7.0, rgb(160, 250, 176));
+    t.ellipse(32.0, 32.0, 3.0, 3.0, rgb(240, 255, 242));
+    for i in 0..40 {
+        let a = i as f32 / 40.0 * std::f32::consts::TAU;
+        let r = 14.0 + noise(i, 5, 239) as f32 / 255.0 * 5.0;
+        t.ellipse(
+            32.0 + a.cos() * r,
+            32.0 + a.sin() * r,
+            2.2,
+            2.2,
+            rgb(42, 170, 78),
+        );
+    }
+    t
+}
+
+fn rocket() -> Tex {
+    let mut t = Tex::new(64, 64);
+    // Tail flame.
+    t.ellipse(32.0, 48.0, 8.0, 11.0, rgb(210, 90, 24));
+    t.ellipse(32.0, 46.0, 5.0, 8.0, rgb(255, 168, 48));
+    t.ellipse(32.0, 44.0, 3.0, 5.0, rgb(255, 240, 180));
+    // Body.
+    t.rect(27, 22, 10, 22, rgb(180, 184, 190));
+    t.rect(27, 22, 3, 22, rgb(224, 228, 234));
+    t.rect(34, 22, 3, 22, rgb(120, 124, 130));
+    // Nose cone.
+    t.ellipse(32.0, 20.0, 5.0, 6.0, rgb(206, 60, 44));
+    t.ellipse(32.0, 19.0, 3.0, 3.5, rgb(240, 120, 90));
+    // Fins.
+    t.line(27, 40, 20, 48, rgb(96, 100, 106));
+    t.line(37, 40, 44, 48, rgb(96, 100, 106));
+    t
+}
+
+fn chaingun_pickup() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 55.0, 22.0, 4.0, rgb(16, 16, 18));
+    // Housing.
+    t.rect(20, 40, 24, 13, rgb(66, 68, 74));
+    t.rect(20, 40, 24, 2, rgb(108, 112, 120));
+    // Barrel cluster.
+    for i in 0..3 {
+        t.rect(22 + i * 7, 30, 5, 12, rgb(88, 92, 98));
+        t.rect(22 + i * 7, 30, 2, 12, rgb(132, 136, 144));
+    }
+    t.rect(18, 34, 28, 4, rgb(52, 54, 60));
+    // Link of ammo.
+    t.rect(42, 44, 10, 4, rgb(180, 150, 50));
+    t.rect(42, 48, 10, 3, rgb(140, 116, 40));
+    t
+}
+
+fn launcher_pickup() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 55.0, 24.0, 4.0, rgb(16, 16, 18));
+    // Fat tube.
+    t.rect(8, 38, 48, 12, rgb(74, 88, 66));
+    t.rect(8, 38, 48, 3, rgb(112, 128, 96));
+    t.rect(8, 47, 48, 3, rgb(44, 54, 40));
+    // Muzzle ring and sight.
+    t.ellipse(56.0, 44.0, 3.0, 7.0, rgb(52, 62, 46));
+    t.rect(26, 32, 12, 6, rgb(56, 58, 62));
+    t.rect(28, 30, 8, 3, rgb(96, 100, 106));
+    // Grip.
+    t.rect(22, 48, 8, 6, rgb(46, 44, 42));
+    t
+}
+
+fn rockets_pickup() -> Tex {
+    let mut t = Tex::new(64, 64);
+    t.ellipse(32.0, 56.0, 18.0, 3.5, rgb(18, 16, 14));
+    // Two rockets standing in a crate.
+    for i in 0..2 {
+        let x = 22 + i * 12;
+        t.rect(x, 26, 8, 24, rgb(172, 176, 182));
+        t.rect(x, 26, 3, 24, rgb(214, 218, 224));
+        t.ellipse((x + 4) as f32, 24.0, 4.0, 5.0, rgb(200, 58, 44));
+    }
+    t.rect(16, 46, 32, 10, rgb(80, 62, 36));
+    t.rect(16, 46, 32, 2, rgb(118, 92, 52));
+    t.rect(16, 54, 32, 2, rgb(50, 38, 22));
+    t
+}
+
+// --- First person weapons: chaingun and launcher ---------------------------
+
+fn chaingun(firing: bool) -> Tex {
+    let mut t = Tex::new(160, 120);
+    let skin = rgb(188, 140, 108);
+    let skin_dark = rgb(142, 98, 72);
+    // Forearm and gripping hand.
+    t.ellipse(96.0, 142.0, 27.0, 48.0, skin_dark);
+    t.ellipse(88.0, 108.0, 17.0, 14.0, skin);
+    for i in 0..3 {
+        t.ellipse(72.0, 94.0 + i as f32 * 7.0, 7.0, 4.5, skin);
+    }
+    // Receiver.
+    t.rect(58, 62, 52, 40, rgb(58, 60, 66));
+    t.rect(58, 62, 52, 4, rgb(102, 106, 114));
+    t.rect(58, 98, 52, 4, rgb(32, 34, 38));
+    t.rect(62, 70, 44, 3, rgb(44, 46, 52));
+    // Ammo drum and feed chute.
+    t.ellipse(44.0, 92.0, 16.0, 16.0, rgb(70, 72, 78));
+    t.ellipse(44.0, 92.0, 10.0, 10.0, rgb(50, 52, 58));
+    t.rect(52, 86, 14, 6, rgb(176, 148, 50));
+    // Three rotating barrels.
+    for i in 0..3 {
+        let x = 66 + i * 15;
+        t.rect(x, 18, 12, 48, rgb(66, 68, 74));
+        t.rect(x, 18, 4, 48, rgb(112, 116, 124));
+        t.rect(x + 8, 18, 4, 48, rgb(38, 40, 46));
+        t.ellipse((x + 6) as f32, 19.0, 6.0, 3.0, rgb(22, 22, 26));
+    }
+    // Barrel clamp.
+    t.rect(62, 40, 52, 6, rgb(48, 50, 56));
+    t.rect(62, 40, 52, 2, rgb(90, 94, 102));
+    if firing {
+        muzzle_flash(&mut t, 92.0, 10.0, 1.3);
+    }
+    t
+}
+
+fn launcher(firing: bool) -> Tex {
+    let mut t = Tex::new(160, 120);
+    let skin = rgb(188, 140, 108);
+    let skin_dark = rgb(142, 98, 72);
+    // Forearm on the grip, support hand under the tube.
+    t.ellipse(104.0, 144.0, 26.0, 46.0, skin_dark);
+    t.ellipse(96.0, 112.0, 16.0, 13.0, skin);
+    t.ellipse(50.0, 116.0, 20.0, 12.0, skin_dark);
+    t.ellipse(58.0, 106.0, 13.0, 10.0, skin);
+    // Tube body.
+    t.rect(30, 56, 100, 26, rgb(74, 88, 66));
+    t.rect(30, 56, 100, 5, rgb(116, 132, 100));
+    t.rect(30, 77, 100, 5, rgb(42, 52, 38));
+    // Rear vent ring and front muzzle.
+    t.rect(24, 52, 10, 34, rgb(56, 66, 50));
+    t.ellipse(132.0, 69.0, 6.0, 17.0, rgb(52, 62, 46));
+    t.ellipse(133.0, 69.0, 4.0, 12.0, rgb(24, 26, 24));
+    // Rocket tip peeking out.
+    t.ellipse(138.0, 69.0, 4.0, 5.0, rgb(196, 60, 44));
+    // Sight and grip.
+    t.rect(76, 44, 18, 14, rgb(56, 58, 62));
+    t.rect(80, 40, 10, 5, rgb(96, 100, 106));
+    t.rect(90, 80, 10, 14, rgb(52, 50, 48));
+    // Heat shield ribs.
+    for i in 0..4 {
+        t.rect(46 + i * 14, 60, 4, 14, rgb(58, 70, 54));
+    }
+    if firing {
+        muzzle_flash(&mut t, 140.0, 62.0, 1.6);
+    }
+    t
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -653,6 +1121,46 @@ mod tests {
         assert_eq!(t.wall(TEX_EXIT).px, exit_switch().px);
         assert_eq!(t.wall(TEX_MARBLE).px, marble().px);
         assert_eq!(t.wall(TEX_CRATE).px, crate_wall().px);
+    }
+
+    #[test]
+    fn the_demon_does_not_look_like_the_imp() {
+        let imp = imp_walk(0);
+        let demon = demon_walk(0);
+        let mean = |t: &Tex| {
+            let mut n = 0.0;
+            let (mut r, mut g, mut b) = (0.0, 0.0, 0.0);
+            for &p in &t.px {
+                if p >> 24 == 0 {
+                    continue;
+                }
+                r += (p & 0xFF) as f32;
+                g += ((p >> 8) & 0xFF) as f32;
+                b += ((p >> 16) & 0xFF) as f32;
+                n += 1.0;
+            }
+            (r / n, g / n, b / n)
+        };
+        let (ir, ig, ib) = mean(&imp);
+        let (dr, dg, db) = mean(&demon);
+        let distance = ((ir - dr).powi(2) + (ig - dg).powi(2) + (ib - db).powi(2)).sqrt();
+        assert!(
+            distance > 40.0,
+            "demon and imp share a palette (distance {distance:.1})"
+        );
+    }
+
+    #[test]
+    fn explosion_frames_fade_out() {
+        let flash = explosion_frame(0);
+        let smoke = explosion_frame(2);
+        let brightness = |t: &Tex| {
+            t.px.iter()
+                .filter(|&&p| p >> 24 != 0)
+                .map(|p| (p & 0xFF) + ((p >> 8) & 0xFF) + ((p >> 16) & 0xFF))
+                .sum::<u32>() as f32
+        };
+        assert!(brightness(&flash) > brightness(&smoke));
     }
 
     #[test]

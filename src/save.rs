@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use crate::config;
 use crate::game::{
-    BarrelSnapshot, Difficulty, DoorSnapshot, EnemySnapshot, EnemyState, Game, PickupKind,
-    PickupSnapshot, PlayerSnapshot, Snapshot, Weapon,
+    BarrelSnapshot, Difficulty, DoorSnapshot, EnemyKind, EnemySnapshot, EnemyState, Game,
+    PickupKind, PickupSnapshot, PlayerSnapshot, Snapshot, Weapon,
 };
 use crate::math::Vec2;
 
@@ -124,7 +124,7 @@ fn encode(run: &Run) -> String {
     ));
     let p = &s.player;
     out.push_str(&format!(
-        "ply {:.4} {:.4} {:.4} {} {} {} {} {}\n",
+        "ply {:.4} {:.4} {:.4} {} {} {} {} {} {} {} {}\n",
         p.pos.x,
         p.pos.y,
         p.angle,
@@ -132,7 +132,10 @@ fn encode(run: &Run) -> String {
         p.bullets,
         p.shells,
         p.weapon.index(),
-        if p.has_shotgun { 1 } else { 0 }
+        if p.has_shotgun { 1 } else { 0 },
+        p.rockets,
+        if p.has_chaingun { 1 } else { 0 },
+        if p.has_launcher { 1 } else { 0 }
     ));
     for d in &s.doors {
         out.push_str(&format!(
@@ -142,7 +145,7 @@ fn encode(run: &Run) -> String {
     }
     for e in &s.enemies {
         out.push_str(&format!(
-            "enemy {:.4} {:.4} {} {} {:.4} {:.4} {:.4} {:.4} {}\n",
+            "enemy {:.4} {:.4} {} {} {:.4} {:.4} {:.4} {:.4} {} {}\n",
             e.pos.x,
             e.pos.y,
             e.health,
@@ -151,7 +154,8 @@ fn encode(run: &Run) -> String {
             e.cooldown,
             e.state_time,
             e.dead_time,
-            if e.alive { 1 } else { 0 }
+            if e.alive { 1 } else { 0 },
+            e.kind.index()
         ));
     }
     for b in &s.barrels {
@@ -229,6 +233,9 @@ fn decode(text: &str) -> Option<Run> {
                     shells: num(&parts, 6)?,
                     weapon: Weapon::from_index(num::<usize>(&parts, 7)?),
                     has_shotgun: flag(&parts, 8),
+                    rockets: num(&parts, 9).unwrap_or(0),
+                    has_chaingun: flag(&parts, 10),
+                    has_launcher: flag(&parts, 11),
                 });
             }
             "door" => doors.push(DoorSnapshot {
@@ -247,6 +254,9 @@ fn decode(text: &str) -> Option<Run> {
                 state_time: num(&parts, 7)?,
                 dead_time: num(&parts, 8)?,
                 alive: flag(&parts, 9),
+                kind: num::<usize>(&parts, 10)
+                    .map(EnemyKind::from_index)
+                    .unwrap_or(EnemyKind::Imp),
             }),
             "barrel" => barrels.push(BarrelSnapshot {
                 pos: point(&parts, 1)?,
@@ -305,6 +315,9 @@ mod tests {
         game.player.bullets = 37;
         game.player.shells = 11;
         game.player.has_shotgun = true;
+        game.player.has_chaingun = true;
+        game.player.has_launcher = true;
+        game.player.rockets = 9;
         game.player.weapon = Weapon::Shotgun;
         // Open a door and take some damage.
         game.player.pos = Vec2::new(6.6, 5.5);
@@ -351,7 +364,17 @@ mod tests {
         assert_eq!(after.player.health, before.player.health);
         assert_eq!(after.player.weapon, Weapon::Shotgun);
         assert!(after.player.has_shotgun);
+        assert_eq!(after.player.rockets, 9);
+        assert!(after.player.has_chaingun);
+        assert!(after.player.has_launcher);
         assert_eq!(after.enemies.len(), before.enemies.len());
+        let kinds: Vec<EnemyKind> = after.enemies.iter().map(|e| e.kind).collect();
+        let before_kinds: Vec<EnemyKind> = before.enemies.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, before_kinds, "enemy kinds were lost");
+        assert!(
+            kinds.contains(&EnemyKind::Demon),
+            "the entryway's demon vanished"
+        );
         assert_eq!(
             after.enemies.iter().filter(|e| e.alive).count(),
             before.enemies.iter().filter(|e| e.alive).count()
@@ -383,6 +406,36 @@ mod tests {
             restored.update(1.0 / 60.0, &Input::default());
         }
         assert!(restored.player.health > 0);
+    }
+
+    #[test]
+    fn saves_from_older_builds_still_load() {
+        let game = played_game();
+        let text = encode(&rundown(&game, 0, 0.0));
+        // Drop the fields the older format did not have.
+        let legacy: String = text
+            .lines()
+            .map(|line| {
+                let mut parts: Vec<&str> = line.split_whitespace().collect();
+                match parts.first().copied() {
+                    Some("ply") => parts.truncate(9),
+                    Some("enemy") => parts.truncate(10),
+                    _ => {}
+                }
+                parts.join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let loaded = decode(&legacy).expect("legacy save should still load");
+        assert_eq!(loaded.snapshot.player.weapon, Weapon::Shotgun);
+        assert_eq!(loaded.snapshot.player.rockets, 0);
+        assert!(
+            loaded
+                .snapshot
+                .enemies
+                .iter()
+                .all(|e| e.kind == EnemyKind::Imp)
+        );
     }
 
     #[test]

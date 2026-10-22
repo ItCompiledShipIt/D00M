@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust" alt="Rust 2024 edition">
-  <img src="https://img.shields.io/badge/tests-63_passing-brightgreen" alt="63 tests passing">
+  <img src="https://img.shields.io/badge/tests-74_passing-brightgreen" alt="74 tests passing">
   <img src="https://img.shields.io/badge/clippy-0_warnings-brightgreen" alt="Clippy clean">
   <img src="https://img.shields.io/badge/dependencies-4-blue" alt="4 dependencies">
   <img src="https://img.shields.io/badge/assets-0_files-red" alt="Zero asset files">
@@ -35,14 +35,14 @@ D00M is a complete five-level FPS episode built on a hand-written software
 raycaster — the renderer, game logic, art and audio are all original Rust
 code in this repo. It started as an experiment ("how much Doom can you rebuild
 with no engine and no assets?") and turned into a full game: textured walls,
-floors and ceilings, sliding doors, enemy AI, explosive barrels, two weapons,
-three difficulties, a full menu front end, save slots, gamepad support and a
-synthesised soundtrack of procedural sound effects.
+floors and ceilings, sliding doors, enemy AI, explosive barrels, four weapons,
+three monster types, three difficulties, a full menu front end, save slots,
+gamepad support and a synthesised soundtrack of procedural sound effects.
 
 Everything you see and hear is computed when the game starts:
 
-- **7 wall textures, 15 sprites, 4 weapon frames** — painted in code, pixel by pixel
-- **14 sound effects and an ambient bed** — synthesised waveforms, no samples
+- **7 wall textures, 33 sprites, 8 weapon frames** — painted in code, pixel by pixel
+- **16 sound effects and an ambient bed** — synthesised waveforms, no samples
 - **A 5×7 bitmap font** — drawn by hand, stored as code
 - **5 levels** — drawn as ASCII maps
 
@@ -80,7 +80,7 @@ numbers on the box:
 | | I'm Too Young to Die (Easy) | Hurt Me Plenty (Normal) | Nightmare! (Hard) |
 | --- | --- | --- | --- |
 | Damage taken | 0.55× | 1.0× | 1.5× |
-| Imp health | 30 | 40 | 55 |
+| Imp health | 30 | 40 | 56 |
 | Imp speed | 0.8× | 1.0× | 1.25× |
 | Imp attack cooldown | 1.35× slower | 1.0× | 0.72× — faster |
 | Demons spawned | a third fewer | all | all |
@@ -98,7 +98,8 @@ numbers on the box:
 | `Shift` | Run |
 | Left mouse / `Space` / `Ctrl` | Fire |
 | `E` | Open a door / use the exit switch |
-| `1` `2` | Pistol / shotgun |
+| `1` `2` `3` `4` | Pistol / shotgun / chaingun / rocket launcher |
+| `[` `]` | Cycle through the guns you own |
 | `Tab` | Automap |
 | `R` | Restart level |
 | `Esc` | Pause / back |
@@ -111,7 +112,7 @@ autosave.
 ### Gamepad
 
 Left stick or D-pad moves, right stick turns, right trigger fires, `X`/`Y`
-uses doors and switches, `LB`/`RB` swap weapons, `Select` opens the automap,
+uses doors and switches, `LB`/`RB` cycle weapons, `Select` opens the automap,
 `Start` pauses, `B` backs out of menus. Menus take the D-pad and `A` to
 confirm. No controller? The game doesn't care. Plug one in mid-game and a
 note appears; unplug it and the game carries on.
@@ -142,12 +143,18 @@ note appears; unplug it and the game carries on.
 - **Renderer** — textured DDA raycaster at a 480×300 internal framebuffer,
   upscaled to the window: distance fog, side shading, per-row textured floors
   and ceilings, head bob and view kick. Billboard sprites are depth-tested
-  per column against the wall z-buffer and sorted back to front, so imps,
-  barrels, pickups and fireballs occlude correctly.
+  per column against the wall z-buffer and sorted back to front, so demons,
+  barrels, pickups and projectiles occlude correctly.
 - **Doors** — sliding doors block sight, sound and movement until opened, and
   auto-close behind you.
-- **Enemies** — idle/chase/attack/pain/death state machines with line of
-  sight, melee and projectile attacks, and corpses that stay where they fell.
+- **Enemies** — three kinds sharing one idle/chase/attack/pain/death state
+  machine: imps (fireballs), demons (fast, melee-only chargers) and hell
+  knights (slow, armoured, throw green hellfire). Each has its own health,
+  speed, reach, damage and cooldown, and corpses stay where they fell.
+- **Weapons** — pistol, shotgun (seven pellets), chaingun (rapid single
+  bullets) and rocket launcher (travelling rockets with splash damage that
+  also chain-detonate barrels and hurt you at close range). Every blast
+  leaves a three-frame flash, fireball and smoke puff that grows and fades.
 - **Audio** — every effect is a synthesised waveform pre-rendered into a
   sample bank at start-up, then mixed live over `cpal`: stereo pan and
   distance falloff per voice, a hard voice cap, ambient ducking in menus, and
@@ -181,7 +188,7 @@ note appears; unplug it and the game carries on.
 ## Development
 
 ```sh
-cargo test               # 63 unit tests
+cargo test               # 74 unit tests
 cargo clippy --all-targets
 cargo run --release -- --shot frame.bmp --at 17.2,2.5,0 --steps 20 --fire
 ```
@@ -204,11 +211,12 @@ cargo run --release -- --shot out.bmp --screen menu
 shows the automap, `--use` presses the use key once, `--fire` holds the
 trigger, and `--screen` captures any front-end screen:
 `menu|load|save|notice|skills|settings|volume|intro|pause|intermission|episode`.
+`--weapon 0-3` equips a gun before the frame is drawn, for checking its art.
 
 ## Roadmap
 
 - Vertical mouselook / true 3D sectors
-- More monsters and weapons, and a proper sprite-sheet animation system
+- A boss encounter, and a proper sprite-sheet animation system
 - Rebindable keys
 - Mouse look while a gamepad is connected (currently the right stick only)
 - Deleting or renaming individual save slots

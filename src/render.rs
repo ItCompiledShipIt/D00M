@@ -282,7 +282,16 @@ impl Renderer {
         panel(frame, W, H, 330, top_i + 7, 140, 34);
 
         // Ammo (current weapon).
-        font::draw(frame, W, H, 18, top_i + 11, "AMMO", 0x00A0_A0A8, 1);
+        font::draw(
+            frame,
+            W,
+            H,
+            18,
+            top_i + 11,
+            game.player.weapon.ammo_label(),
+            0x00A0_A0A8,
+            1,
+        );
         let ammo = game.player.ammo().to_string();
         font::draw(frame, W, H, 18, top_i + 20, &ammo, HUD_ORANGE, 3);
         font::draw(
@@ -300,8 +309,18 @@ impl Renderer {
             W,
             H,
             96,
-            top_i + 22,
+            top_i + 21,
             &format!("S{}", game.player.shells),
+            0x0090_9098,
+            1,
+        );
+        font::draw(
+            frame,
+            W,
+            H,
+            96,
+            top_i + 30,
+            &format!("R{}", game.player.rockets),
             0x0090_9098,
             1,
         );
@@ -363,8 +382,8 @@ impl Renderer {
             W,
             H,
             340,
-            top_i + 37,
-            "E USE  1/2 SWAP",
+            top_i + 34,
+            "E USE  1-4 SWAP",
             0x0078_7880,
             1,
         );

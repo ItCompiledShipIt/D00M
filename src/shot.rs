@@ -2,7 +2,7 @@
 //! opening a window. Writes 24-bit BMP files so it needs no image crate.
 
 use crate::config::Score;
-use crate::game::{Difficulty, Game, Input};
+use crate::game::{Difficulty, Game, Input, Weapon};
 use crate::math::Vec2;
 use crate::render::{H, Renderer, W};
 use crate::save::SlotInfo;
@@ -16,6 +16,8 @@ pub struct ShotOptions {
     pub show_map: bool,
     pub use_key: bool,
     pub level: usize,
+    /// Equip a weapon before the frame is drawn, for checking its art.
+    pub weapon: Option<usize>,
 }
 
 pub fn capture(path: &str, opts: ShotOptions) -> std::io::Result<()> {
@@ -25,6 +27,19 @@ pub fn capture(path: &str, opts: ShotOptions) -> std::io::Result<()> {
     }
     if let Some(angle) = opts.angle {
         game.player.angle = angle;
+    }
+    if let Some(index) = opts.weapon {
+        let weapon = Weapon::from_index(index);
+        match weapon {
+            Weapon::Pistol => {}
+            Weapon::Shotgun => game.player.has_shotgun = true,
+            Weapon::Chaingun => game.player.has_chaingun = true,
+            Weapon::Launcher => game.player.has_launcher = true,
+        }
+        game.player.weapon = weapon;
+        game.player.bullets = 120;
+        game.player.shells = 32;
+        game.player.rockets = 24;
     }
     if opts.use_key {
         let input = Input {

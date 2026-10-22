@@ -72,8 +72,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "D00M\n\n  cargo run --release            play\n  cargo run --release -- --shot frame.bmp [--at X,Y,ANGLE] [--level N] [--steps N] [--fire] [--map] [--use]\n  cargo run --release -- --shot frame.bmp --screen menu|load|save|notice|skills|settings|volume|intro|pause|intermission|episode\n\n\
-             Controls:\n  Menus: arrows/W S select, enter confirm, esc back\n  WASD move / strafe, mouse or arrow keys turn, Shift run\n  Left mouse / Space fire, E use, 1-2 weapons, Tab map\n  Esc pause, R restart level"
+            "D00M\n\n  cargo run --release            play\n  cargo run --release -- --shot frame.bmp [--at X,Y,ANGLE] [--level N] [--steps N] [--weapon 0-3] [--fire] [--map] [--use]\n  cargo run --release -- --shot frame.bmp --screen menu|load|save|notice|skills|settings|volume|intro|pause|intermission|episode\n\n\
+             Controls:\n  Menus: arrows/W S select, enter confirm, esc back\n  WASD move / strafe, mouse or arrow keys turn, Shift run\n  Left mouse / Space fire, E use, 1-4 weapons, [ ] cycle guns, Tab map\n  Esc pause, R restart level"
         );
         return Ok(());
     }
@@ -98,6 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             show_map: false,
             use_key: false,
             level: 0,
+            weapon: None,
         };
         if let Some(j) = args.iter().position(|a| a == "--at")
             && let Some(spec) = args.get(j + 1)
@@ -126,6 +127,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|n| n.parse().ok())
         {
             opts.level = level;
+        }
+        if let Some(weapon) = args
+            .iter()
+            .position(|a| a == "--weapon")
+            .and_then(|j| args.get(j + 1))
+            .and_then(|n| n.parse().ok())
+        {
+            opts.weapon = Some(weapon);
         }
         opts.fire = args.iter().any(|a| a == "--fire");
         opts.show_map = args.iter().any(|a| a == "--map");
@@ -505,8 +514,8 @@ impl App {
                     KeyCode::Enter
                 }
             }
-            PadAction::PrevWeapon => KeyCode::Digit1,
-            PadAction::NextWeapon => KeyCode::Digit2,
+            PadAction::PrevWeapon => KeyCode::BracketLeft,
+            PadAction::NextWeapon => KeyCode::BracketRight,
             PadAction::Map => KeyCode::Tab,
         };
         self.on_key(code);
@@ -740,6 +749,10 @@ impl App {
                 KeyCode::KeyR => self.input.restart = true,
                 KeyCode::Digit1 => self.input.weapon1 = true,
                 KeyCode::Digit2 => self.input.weapon2 = true,
+                KeyCode::Digit3 => self.input.weapon3 = true,
+                KeyCode::Digit4 => self.input.weapon4 = true,
+                KeyCode::BracketLeft => self.input.weapon_prev = true,
+                KeyCode::BracketRight => self.input.weapon_next = true,
                 _ => {}
             },
             Screen::Paused => match code {
@@ -801,6 +814,10 @@ impl App {
         self.input.use_pressed = false;
         self.input.weapon1 = false;
         self.input.weapon2 = false;
+        self.input.weapon3 = false;
+        self.input.weapon4 = false;
+        self.input.weapon_next = false;
+        self.input.weapon_prev = false;
         self.input.restart = false;
         self.input.toggle_map = false;
         self.input.mouse_dx = 0.0;

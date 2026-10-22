@@ -33,9 +33,11 @@ pub enum SoundId {
     ImpAttack,
     ImpPain,
     ImpDeath,
+    Chaingun,
+    RocketLaunch,
 }
 
-const SOUND_COUNT: usize = 14;
+const SOUND_COUNT: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SoundRequest {
@@ -80,6 +82,8 @@ impl Bank {
             Arc::new(imp_attack(sample_rate)),
             Arc::new(imp_pain(sample_rate)),
             Arc::new(imp_death(sample_rate)),
+            Arc::new(chaingun(sample_rate)),
+            Arc::new(rocket_launch(sample_rate)),
         ];
         debug_assert_eq!(sounds.len(), SOUND_COUNT);
         Self {
@@ -336,6 +340,50 @@ fn pistol(sr: f32) -> Vec<f32> {
         out.push((crack * 0.9 + body * 0.6 + thump * 0.55) * attack);
     }
     normalize(out, 0.85)
+}
+
+/// A short, dry mechanical bark so a held trigger does not turn into mush.
+fn chaingun(sr: f32) -> Vec<f32> {
+    let n = (sr * 0.16) as usize;
+    let mut rng = Rng::new(0x6A11);
+    let mut lp = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * 0.45;
+        let crack = noise * (-t * 260.0).exp();
+        let body = lp * (-t * 40.0).exp();
+        let thump = (TAU * 128.0 * t).sin() * (-t * 34.0).exp();
+        // Slight metallic ring from the spinning barrels.
+        let ring = (TAU * 620.0 * t).sin() * (-t * 60.0).exp() * 0.18;
+        let attack = (t * 1400.0).min(1.0);
+        out.push((crack * 0.7 + body * 0.5 + thump * 0.5 + ring) * attack);
+    }
+    normalize(out, 0.75)
+}
+
+/// Launch whoosh: a noise sweep that falls away, with a low thump.
+fn rocket_launch(sr: f32) -> Vec<f32> {
+    let dur = 0.6f32;
+    let n = (sr * dur) as usize;
+    let mut rng = Rng::new(0x70C4);
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * (0.5 - 0.4 * (t / dur));
+        let freq = 70.0 + 40.0 * (-t * 6.0).exp();
+        phase += TAU * freq / sr;
+        let thump = (TAU * 48.0 * t).sin() * (-t * 9.0).exp();
+        let hiss = lp * (-t * 3.2).exp() * 1.4;
+        let puff = (phase / TAU).fract() * 2.0 - 1.0;
+        let attack = (t * 400.0).min(1.0);
+        out.push((thump * 0.9 + hiss + puff * 0.25 * (-t * 7.0).exp()) * attack);
+    }
+    normalize(out, 0.9)
 }
 
 fn shotgun(sr: f32) -> Vec<f32> {
