@@ -355,6 +355,36 @@ impl EnemyKind {
         }
     }
 
+    /// The sound this kind makes when it spots the player.
+    fn sight_sound(self) -> SoundId {
+        match self {
+            EnemyKind::Imp => SoundId::ImpSight,
+            EnemyKind::Demon => SoundId::DemonSight,
+            EnemyKind::Knight => SoundId::KnightSight,
+            EnemyKind::Boss => SoundId::BossSight,
+        }
+    }
+
+    /// The sound this kind makes when a hit lands on it.
+    fn pain_sound(self) -> SoundId {
+        match self {
+            EnemyKind::Imp => SoundId::ImpPain,
+            EnemyKind::Demon => SoundId::DemonPain,
+            EnemyKind::Knight => SoundId::KnightPain,
+            EnemyKind::Boss => SoundId::BossPain,
+        }
+    }
+
+    /// The sound this kind makes when it attacks.
+    fn attack_sound(self) -> SoundId {
+        match self {
+            EnemyKind::Imp => SoundId::ImpAttack,
+            EnemyKind::Demon => SoundId::DemonAttack,
+            EnemyKind::Knight => SoundId::KnightAttack,
+            EnemyKind::Boss => SoundId::BossAttack,
+        }
+    }
+
     /// Chasing speed in cells per second.
     fn speed(self) -> f32 {
         match self {
@@ -1336,7 +1366,7 @@ impl Game {
                     self.boss_falls(pos);
                 }
             } else {
-                self.play_at(SoundId::ImpPain, pos, 0.75);
+                self.play_at(kind.pain_sound(), pos, 0.75);
             }
             return true;
         }
@@ -1376,7 +1406,7 @@ impl Game {
                         if e.kind == EnemyKind::Boss {
                             boss_woke = true;
                         }
-                        sounds.push((SoundId::ImpSight, e.pos));
+                        sounds.push((e.kind.sight_sound(), e.pos));
                     }
                 }
                 EnemyState::Pain => {
@@ -1421,7 +1451,7 @@ impl Game {
                             e.cooldown = kind.attack_cooldown() * cd_mul * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.32;
-                            sounds.push((SoundId::ImpAttack, e.pos));
+                            sounds.push((kind.attack_sound(), e.pos));
                         } else if let Some((speed, damage, range, sprite)) = kind.projectile()
                             && dist < range
                         {
@@ -1439,7 +1469,7 @@ impl Game {
                             e.cooldown = kind.attack_cooldown() * 2.0 * cd_mul * cooldown_scale;
                             e.state = EnemyState::Attack;
                             e.state_time = 0.4;
-                            sounds.push((SoundId::ImpAttack, e.pos));
+                            sounds.push((kind.attack_sound(), e.pos));
                         }
                     }
                 }
@@ -2531,6 +2561,22 @@ mod tests {
         assert!(!g.bursts.is_empty(), "no explosion flash");
         g.age_bursts(1.0);
         assert!(g.bursts.is_empty(), "the flash never faded");
+    }
+
+    #[test]
+    fn every_kind_has_its_own_voice() {
+        let voices: [fn(EnemyKind) -> SoundId; 4] = [
+            EnemyKind::sight_sound,
+            EnemyKind::pain_sound,
+            EnemyKind::attack_sound,
+            EnemyKind::death_sound,
+        ];
+        for voice in voices {
+            let mut ids: Vec<usize> = EnemyKind::ALL.iter().map(|k| voice(*k) as usize).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), 4, "two kinds share a voice");
+        }
     }
 
     #[test]

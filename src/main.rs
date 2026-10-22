@@ -319,6 +319,7 @@ impl App {
         };
         if let Some(audio) = &self.audio {
             audio.set_ambient_gain(duck);
+            audio.set_music(matches!(screen, Screen::Playing));
         }
         self.screen = screen;
     }

@@ -38,9 +38,18 @@ pub enum SoundId {
     DemonDeath,
     KnightDeath,
     BossDeath,
+    DemonSight,
+    DemonPain,
+    DemonAttack,
+    KnightSight,
+    KnightPain,
+    KnightAttack,
+    BossSight,
+    BossPain,
+    BossAttack,
 }
 
-const SOUND_COUNT: usize = 19;
+const SOUND_COUNT: usize = 28;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SoundRequest {
@@ -60,12 +69,16 @@ enum Command {
     },
     /// 0..1 multiplier used to duck the ambient bed for menus and pause.
     AmbientGain(f32),
+    /// Crossfade the music bed in (gameplay) or out (everywhere else).
+    Music(bool),
 }
 
-/// Pre-rendered effects, indexed by `SoundId as usize`, plus the ambient loop.
+/// Pre-rendered effects, indexed by `SoundId as usize`, plus the ambient
+/// loop and the music loop.
 pub struct Bank {
     pub sounds: Vec<Arc<Vec<f32>>>,
     pub ambient: Arc<Vec<f32>>,
+    pub music: Arc<Vec<f32>>,
 }
 
 impl Bank {
@@ -90,11 +103,21 @@ impl Bank {
             Arc::new(demon_death(sample_rate)),
             Arc::new(knight_death(sample_rate)),
             Arc::new(boss_death(sample_rate)),
+            Arc::new(demon_sight(sample_rate)),
+            Arc::new(demon_pain(sample_rate)),
+            Arc::new(demon_attack(sample_rate)),
+            Arc::new(knight_sight(sample_rate)),
+            Arc::new(knight_pain(sample_rate)),
+            Arc::new(knight_attack(sample_rate)),
+            Arc::new(boss_sight(sample_rate)),
+            Arc::new(boss_pain(sample_rate)),
+            Arc::new(boss_attack(sample_rate)),
         ];
         debug_assert_eq!(sounds.len(), SOUND_COUNT);
         Self {
             sounds,
             ambient: Arc::new(ambient(sample_rate)),
+            music: Arc::new(music_loop(sample_rate)),
         }
     }
 }
@@ -110,6 +133,9 @@ pub struct Mixer {
     bank: Arc<Bank>,
     voices: Vec<Voice>,
     ambient_pos: usize,
+    music_pos: usize,
+    music_on: bool,
+    music_mix: f32,
     master: f32,
     sfx: f32,
     ambient_vol: f32,
@@ -122,11 +148,18 @@ impl Mixer {
             bank,
             voices: Vec::with_capacity(MAX_VOICES),
             ambient_pos: 0,
+            music_pos: 0,
+            music_on: false,
+            music_mix: 0.0,
             master: 1.0,
             sfx: 1.0,
             ambient_vol: 0.7,
             duck: 0.0,
         }
+    }
+
+    pub fn set_music(&mut self, on: bool) {
+        self.music_on = on;
     }
 
     pub fn set_volumes(&mut self, master: f32, sfx: f32, ambient: f32) {
@@ -167,7 +200,9 @@ impl Mixer {
         let channels = channels.max(1);
         let sfx_gain = self.master * self.sfx;
         let ambient_gain = self.master * self.ambient_vol * self.duck * 0.4;
+        let music_gain = self.master * self.ambient_vol * self.duck * 0.55;
         let ambient_len = self.bank.ambient.len();
+        let music_len = self.bank.music.len();
         for frame in data.chunks_mut(channels) {
             let mut l = 0.0f32;
             let mut r = 0.0f32;
@@ -178,11 +213,25 @@ impl Mixer {
                     voice.pos += 1;
                 }
             }
+            // Crossfade the music over roughly a second and a half; the
+            // drone recedes underneath it while it plays.
+            if self.music_on && self.music_mix < 1.0 {
+                self.music_mix = (self.music_mix + 1.0 / 72_000.0).min(1.0);
+            } else if !self.music_on && self.music_mix > 0.0 {
+                self.music_mix = (self.music_mix - 1.0 / 72_000.0).max(0.0);
+            }
             if ambient_gain > 0.0 && ambient_len > 0 {
-                let sample = self.bank.ambient[self.ambient_pos] * ambient_gain;
+                let sample =
+                    self.bank.ambient[self.ambient_pos] * ambient_gain * (1.0 - 0.7 * self.music_mix);
                 l += sample;
                 r += sample;
                 self.ambient_pos = (self.ambient_pos + 1) % ambient_len;
+            }
+            if self.music_mix > 0.001 && music_len > 0 {
+                let sample = self.bank.music[self.music_pos] * music_gain * self.music_mix;
+                l += sample;
+                r += sample;
+                self.music_pos = (self.music_pos + 1) % music_len;
             }
             let l = l.tanh();
             let r = r.tanh();
@@ -251,7 +300,7 @@ impl Audio {
             eprintln!("audio: could not start stream ({e}), running silent");
             return None;
         }
-        eprintln!("audio: {sample_rate} Hz, {channels} ch, {SOUND_COUNT} effects + ambience");
+        eprintln!("audio: {sample_rate} Hz, {channels} ch, {SOUND_COUNT} effects + ambience + music");
         Some(Audio {
             _stream: stream,
             tx,
@@ -272,6 +321,10 @@ impl Audio {
 
     pub fn set_ambient_gain(&self, gain: f32) {
         let _ = self.tx.send(Command::AmbientGain(gain));
+    }
+
+    pub fn set_music(&self, on: bool) {
+        let _ = self.tx.send(Command::Music(on));
     }
 }
 
@@ -298,6 +351,7 @@ where
                         ambient,
                     } => mixer.set_volumes(master, sfx, ambient),
                     Command::AmbientGain(gain) => mixer.set_duck(gain),
+                    Command::Music(on) => mixer.set_music(on),
                 }
             }
             mixer.render(data, channels);
@@ -721,6 +775,203 @@ fn boss_death(sr: f32) -> Vec<f32> {
     normalize(out, 0.9)
 }
 
+/// A monster voice: a saw growl sliding from `base` Hz down to `end`,
+/// roughened by a noise bed (`grit` is the noise share). Each kind gets
+/// its own register — the imp's hand-rolled voice sits highest, the
+/// Gatekeeper's is nearly subsonic.
+fn growl(sr: f32, seed: u64, base: f32, end: f32, dur: f32, grit: f32) -> Vec<f32> {
+    let n = (sr * dur) as usize;
+    let mut rng = Rng::new(seed);
+    let mut lp = 0.0f32;
+    let mut phase = 0.0f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / sr;
+        let frac = t / dur;
+        let noise = rng.range(-1.0, 1.0);
+        lp += (noise - lp) * 0.09;
+        let freq = (base + (end - base) * frac).max(24.0) + (t * TAU * 17.0).sin() * 5.0;
+        phase += TAU * freq / sr;
+        let tone = saw(phase) * (1.0 - grit) + lp * grit;
+        let env = (t * 30.0).min(1.0) * (1.0 - frac).powf(1.1);
+        out.push(tone * env);
+    }
+    normalize(out, 0.78)
+}
+
+fn demon_sight(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B01, 132.0, 92.0, 0.5, 0.5)
+}
+
+fn demon_pain(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B02, 155.0, 112.0, 0.22, 0.45)
+}
+
+fn demon_attack(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B03, 104.0, 60.0, 0.34, 0.55)
+}
+
+fn knight_sight(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B04, 92.0, 70.0, 0.62, 0.3)
+}
+
+fn knight_pain(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B05, 122.0, 96.0, 0.22, 0.3)
+}
+
+fn knight_attack(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B06, 82.0, 54.0, 0.4, 0.35)
+}
+
+fn boss_sight(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B07, 66.0, 44.0, 0.9, 0.5)
+}
+
+fn boss_pain(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B08, 86.0, 60.0, 0.3, 0.45)
+}
+
+fn boss_attack(sr: f32) -> Vec<f32> {
+    growl(sr, 0x1B09, 56.0, 34.0, 0.55, 0.55)
+}
+
+/// Add a harmonic tone (fundamental + two overtones) with an exponential
+/// decay and a forced fade at the tail so notes never click off.
+fn add_harmonic(
+    out: &mut [f32],
+    sr: f32,
+    start: f32,
+    dur: f32,
+    freq: f32,
+    gain: f32,
+    bright: f32,
+    decay: f32,
+) {
+    let s0 = (start * sr) as usize;
+    let len = (dur * sr) as usize;
+    for i in 0..len {
+        let idx = s0 + i;
+        if idx >= out.len() {
+            break;
+        }
+        let t = i as f32 / sr;
+        let tail = ((1.0 - i as f32 / len as f32) * 8.0).min(1.0);
+        let env = (t * 40.0).min(1.0) * (-t * decay).exp() * tail;
+        let ph = t * freq * TAU;
+        out[idx] +=
+            (ph.sin() + bright * (ph * 2.0).sin() * 0.5 + bright * bright * (ph * 3.0).sin() * 0.25)
+                * gain
+                * env;
+    }
+}
+
+/// Add a slowly swelling pad tone that starts and ends at zero, so chord
+/// changes (and the loop point itself) are seamless.
+fn add_pad(out: &mut [f32], sr: f32, start: f32, dur: f32, freq: f32, gain: f32) {
+    let s0 = (start * sr) as usize;
+    let len = (dur * sr) as usize;
+    for i in 0..len {
+        let idx = s0 + i;
+        if idx >= out.len() {
+            break;
+        }
+        let frac = i as f32 / len as f32;
+        let env = (frac * std::f32::consts::PI).sin().powf(1.5);
+        let t = i as f32 / sr;
+        let ph = t * freq * TAU;
+        out[idx] += (ph.sin() + (ph * 2.003).sin() * 0.18) * gain * env;
+    }
+}
+
+fn add_noise_hit(out: &mut [f32], noise: &[f32], sr: f32, start: f32, dur: f32, gain: f32, decay: f32) {
+    let s0 = (start * sr) as usize;
+    let len = (dur * sr) as usize;
+    for i in 0..len {
+        let idx = s0 + i;
+        if idx >= out.len() {
+            break;
+        }
+        let t = i as f32 / sr;
+        out[idx] += noise[idx % noise.len()] * gain * (-t * decay).exp();
+    }
+}
+
+fn add_kick(out: &mut [f32], sr: f32, start: f32) {
+    let s0 = (start * sr) as usize;
+    let len = (0.22 * sr) as usize;
+    for i in 0..len {
+        let idx = s0 + i;
+        if idx >= out.len() {
+            break;
+        }
+        let t = i as f32 / sr;
+        let freq = 42.0 + 78.0 * (-t * 30.0).exp();
+        out[idx] += (t * freq * TAU).sin() * 0.55 * (-t * 16.0).exp();
+    }
+}
+
+/// The score: a 16-bar loop in D minor at 92 BPM, rendered note by note —
+/// an eighth-note bass driving under minor pads, a sparse bell lead in
+/// the second half, and a kit built from sine drops and noise. Every
+/// envelope is bar-quantised, so the loop repeats seamlessly.
+fn music_loop(sr: f32) -> Vec<f32> {
+    const BPM: f32 = 92.0;
+    let spb = 60.0 / BPM;
+    let bar = spb * 4.0;
+    let n = (sr * bar * 16.0) as usize;
+    let mut out = vec![0.0f32; n];
+    let mut rng = Rng::new(0x4D55_5331);
+    let noise: Vec<f32> = (0..n).map(|_| rng.range(-1.0, 1.0)).collect();
+    // Two bars each: Dm, Bb, Gm, Dm — twice through.
+    let seq = [0usize, 1, 2, 0];
+    let roots = [73.42f32, 58.27, 49.0, 73.42];
+    let pads = [
+        [146.83f32, 174.61, 220.0],
+        [116.54, 146.83, 174.61],
+        [196.0, 233.08, 293.66],
+        [146.83, 174.61, 220.0],
+    ];
+    for b in 0..16usize {
+        let ci = seq[(b / 2) % 4];
+        let bs = b as f32 * bar;
+        if b % 2 == 0 {
+            for tone in pads[ci] {
+                add_pad(&mut out, sr, bs, bar * 2.0, tone, 0.045);
+            }
+        }
+        for k in 0..8usize {
+            let f = if k == 4 { roots[ci] * 2.0 } else { roots[ci] };
+            add_harmonic(&mut out, sr, bs + k as f32 * spb / 2.0, spb * 0.46, f, 0.16, 0.7, 6.0);
+        }
+        for beat in 0..4usize {
+            add_kick(&mut out, sr, bs + beat as f32 * spb);
+            if beat % 2 == 1 {
+                add_noise_hit(&mut out, &noise, sr, bs + beat as f32 * spb, 0.11, 0.1, 26.0);
+            }
+            add_noise_hit(&mut out, &noise, sr, bs + (beat as f32 + 0.5) * spb, 0.035, 0.035, 90.0);
+        }
+    }
+    // The bell lead: D minor pentatonic, second half only.
+    let lead: [(usize, f32, f32, f32); 12] = [
+        (8, 0.0, 587.33, 1.5),
+        (8, 2.0, 698.46, 1.0),
+        (9, 0.0, 880.0, 2.0),
+        (10, 0.0, 783.99, 1.5),
+        (10, 3.0, 698.46, 0.5),
+        (11, 0.0, 659.25, 2.0),
+        (12, 0.0, 587.33, 1.5),
+        (12, 2.0, 523.25, 1.0),
+        (13, 0.0, 587.33, 3.0),
+        (14, 0.0, 698.46, 1.5),
+        (14, 2.0, 880.0, 1.0),
+        (15, 0.0, 1046.5, 3.5),
+    ];
+    for (b, beat, f, beats) in lead {
+        add_harmonic(&mut out, sr, b as f32 * bar + beat * spb, beats * spb, f, 0.11, 0.25, 2.2);
+    }
+    normalize(out, 0.5)
+}
+
 /// An eight second, seamlessly looping industrial drone.
 fn ambient(sr: f32) -> Vec<f32> {
     let dur = 8.0f32;
@@ -770,6 +1021,33 @@ mod tests {
             let peak = sound.iter().fold(0.0f32, |m, s| m.max(s.abs()));
             assert!(peak > 0.3 && peak <= 1.0, "effect {i} peak {peak}");
         }
+    }
+
+    #[test]
+    fn music_loop_is_a_full_finite_song() {
+        let bank = Bank::generate(22_050.0);
+        // Sixteen bars at 92 BPM is about 41.7 seconds.
+        assert!(bank.music.len() > 22_050 * 40 && bank.music.len() < 22_050 * 44);
+        assert!(bank.music.iter().all(|s| s.is_finite()));
+        let peak = bank.music.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.3 && peak <= 1.0, "music peak {peak}");
+    }
+
+    #[test]
+    fn music_plays_only_when_switched_on() {
+        let bank = Arc::new(Bank::generate(22_050.0));
+        let mut mixer = Mixer::new(bank);
+        mixer.set_volumes(1.0, 1.0, 1.0);
+        mixer.set_duck(1.0);
+        let mut buf = vec![0.0f32; 4096];
+        mixer.render(&mut buf, 2);
+        assert_eq!(mixer.music_pos, 0, "music advanced while switched off");
+        mixer.set_music(true);
+        for _ in 0..30 {
+            mixer.render(&mut buf, 2);
+        }
+        assert!(mixer.music_pos > 0, "music never started");
+        assert!(buf.iter().any(|s| s.abs() > 0.0), "music produced silence");
     }
 
     #[test]
