@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust" alt="Rust 2024 edition">
-  <img src="https://img.shields.io/badge/tests-74_passing-brightgreen" alt="74 tests passing">
+  <img src="https://img.shields.io/badge/tests-92_passing-brightgreen" alt="92 tests passing">
   <img src="https://img.shields.io/badge/clippy-0_warnings-brightgreen" alt="Clippy clean">
   <img src="https://img.shields.io/badge/dependencies-4-blue" alt="4 dependencies">
   <img src="https://img.shields.io/badge/assets-0_files-red" alt="Zero asset files">
@@ -35,21 +35,26 @@ D00M is a complete five-level FPS episode built on a hand-written software
 raycaster — the renderer, game logic, art and audio are all original Rust
 code in this repo. It started as an experiment ("how much Doom can you rebuild
 with no engine and no assets?") and turned into a full game: textured walls,
-floors and ceilings, sliding doors, enemy AI, explosive barrels, four weapons,
-three monster types, three difficulties, a full menu front end, save slots,
-gamepad support and a synthesised soundtrack of procedural sound effects.
+floors and ceilings, sliding doors, secret niches, enemy AI, explosive
+barrels, four weapons, three monster types and a boss, three difficulties, a
+full menu front end, save slots, gamepad support and a fully synthesised
+soundtrack — effects, ambience and score alike.
 
 Everything you see and hear is computed when the game starts:
 
-- **7 wall textures, 33 sprites, 8 weapon frames** — painted in code, pixel by pixel
-- **16 sound effects and an ambient bed** — synthesised waveforms, no samples
+- **7 wall textures, 39 sprites, 8 weapon frames** — painted in code, pixel by pixel
+- **28 sound effects, an ambient bed and a 16-bar score in D minor** — synthesised waveforms, no samples
 - **A 5×7 bitmap font** — drawn by hand, stored as code
-- **5 levels** — drawn as ASCII maps
+- **5 levels** — drawn as ASCII maps, each hiding one secret
 
 The only dependencies are the platform plumbing: `winit` (window),
 `softbuffer` (framebuffer), `cpal` (audio) and `gilrs` (gamepads).
 
 ## Play it
+
+Grab the Linux binary from the
+[latest release](https://github.com/ItCompiledShipIt/D00M/releases/latest),
+unpack it and run `./d00m` — no toolchain needed. Or build from source:
 
 ```sh
 git clone https://github.com/ItCompiledShipIt/D00M.git
@@ -70,7 +75,7 @@ episode-complete screen and, if the run is good enough, the high-score table.
 | E1M2 | The Foundry | Tech halls, crates, more teeth |
 | E1M3 | Gates of Hell | The episode turns red and means it |
 | E1M4 | Crimson Depths | Tight rooms, crossfire, barrel traps |
-| E1M5 | The Inferno | Everything, everywhere, all at once |
+| E1M5 | The Inferno | Everything, everywhere — and the Gatekeeper holds the exit |
 
 ## Difficulty
 
@@ -134,7 +139,7 @@ note appears; unplug it and the game carries on.
   pause or quit, into one of three slots. `CONTINUE` picks up the most
   recent save; `LOAD GAME` lists all three with their level, kills, time and
   skill; `SAVE GAME` in the pause menu writes the run to a slot you choose
-- **Intermissions** between levels with kills and time, and an
+- **Intermissions** between levels with kills, secrets found and time, and an
   **episode-complete screen** with a top-five high-score table (kills, time,
   skill) that persists between runs
 
@@ -146,20 +151,30 @@ note appears; unplug it and the game carries on.
   per column against the wall z-buffer and sorted back to front, so demons,
   barrels, pickups and projectiles occlude correctly.
 - **Doors** — sliding doors block sight, sound and movement until opened, and
-  auto-close behind you.
-- **Enemies** — three kinds sharing one idle/chase/attack/pain/death state
-  machine: imps (fireballs), demons (fast, melee-only chargers) and hell
+  auto-close behind you. Every level also hides a **secret niche** in its
+  walls — dressed in the neighbouring wall texture, invisible on the
+  automap — that slides open once, stays open, and holds a medkit.
+- **Enemies** — four kinds sharing one idle/chase/attack/pain/death state
+  machine: imps (fireballs), demons (fast, melee-only chargers), hell
   knights (slow, heavily armoured — their plates turn aside a quarter of
-  every hit — and throw green hellfire). Each has its own health,
-  speed, reach, damage and cooldown, and corpses stay where they fell.
+  every hit — and throw green hellfire) and **the Gatekeeper**, a 600-HP
+  boss who fans hellfire in threes, enrages at half health, and seals the
+  final exit for as long as he lives. Each kind has its own health, speed,
+  reach, damage and cooldown, its own synthesised voice (sight, pain,
+  attack and death), and corpses stay where they fell.
 - **Weapons** — pistol, shotgun (seven pellets), chaingun (rapid single
   bullets) and rocket launcher (travelling rockets with splash damage that
   also chain-detonate barrels and hurt you at close range). Every blast
   leaves a three-frame flash, fireball and smoke puff that grows and fades.
+- **Armour** — one vest per level. While you wear it, it eats a third of
+  every hit until it is spent; the HUD shows what is left.
 - **Audio** — every effect is a synthesised waveform pre-rendered into a
   sample bank at start-up, then mixed live over `cpal`: stereo pan and
   distance falloff per voice, a hard voice cap, ambient ducking in menus, and
-  a graceful fall-back to silence when no audio device exists.
+  a graceful fall-back to silence when no audio device exists. The score is
+  composed the same way — a 16-bar loop in D minor (eighth-note bass, minor
+  pads, a bell lead, a kit of sine drops and noise) that crossfades in for
+  gameplay and out again in the menus.
 - **Saves** — a versioned line-per-entity text format (`D00M SAVE 1`):
   diffable, hand-editable, and decoded defensively — a corrupt save is simply
   not offered, never half-loaded.
@@ -189,7 +204,7 @@ note appears; unplug it and the game carries on.
 ## Development
 
 ```sh
-cargo test               # 74 unit tests
+cargo test               # 92 unit tests
 cargo clippy --all-targets
 cargo run --release -- --shot frame.bmp --at 17.2,2.5,0 --steps 20 --fire
 ```
@@ -217,10 +232,15 @@ trigger, and `--screen` captures any front-end screen:
 ## Roadmap
 
 - Vertical mouselook / true 3D sectors
-- A boss encounter, and a proper sprite-sheet animation system
+- A proper sprite-sheet animation system
 - Rebindable keys
 - Mouse look while a gamepad is connected (currently the right stick only)
 - Deleting or renaming individual save slots
+- Windows and macOS builds
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ---
 
